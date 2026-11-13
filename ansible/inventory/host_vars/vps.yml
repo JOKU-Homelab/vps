@@ -9,14 +9,14 @@ vps_users:
     shell: /bin/bash
     groups:
       - wheel
-    public_key: REPLACE_WITH_ADMIN_SSH_PUBLIC_KEY
+    public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDTLgNWRdjynB6X2rpL06FwuSQjetgcMkOL+UEfFDUDb
     key_options: no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding
     passwordless_sudo: true
-  - name: operator
+  - name: joku
     comment: VPS operator
     shell: /bin/bash
     groups:
       - wheel
       - docker
-    public_key: REPLACE_WITH_OPERATOR_SSH_PUBLIC_KEY
+    public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAKMQDf49OZXl0EknaWkf1lNFuAjf2HwJksGVQsxCGPw
     passwordless_sudo: true
