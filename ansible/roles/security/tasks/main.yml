@@ -12,18 +12,24 @@
   register: selinux_current_mode
   changed_when: false
 
-- name: Require an enabled SELinux installation
-  ansible.builtin.assert:
-    that:
-      - selinux_current_mode.stdout != 'Disabled'
-    fail_msg: >-
-      SELinux is disabled. Enabling it safely requires a filesystem relabel and
-      reboot; handle that maintenance separately before applying this playbook.
+- name: Record whether SELinux is active on this host
+  ansible.builtin.set_fact:
+    vps_selinux_enabled: "{{ selinux_current_mode.stdout != 'Disabled' }}"
 
 - name: Enforce SELinux policy
   ansible.posix.selinux:
     policy: targeted
     state: enforcing
+  when: vps_selinux_enabled
+
+- name: Explain when SELinux remains disabled
+  ansible.builtin.debug:
+    msg: >-
+      SELinux is disabled by the host image. Continuing without SELinux labels;
+      Docker's SELinux isolation will also be disabled. Enable SELinux separately
+      with a planned permissive boot and filesystem relabel if this VPS image
+      supports it.
+  when: not vps_selinux_enabled
 
 - name: Enable firewalld while preserving existing firewall rules
   ansible.builtin.service:

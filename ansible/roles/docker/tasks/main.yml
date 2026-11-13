@@ -23,6 +23,17 @@
       - docker-compose-plugin
     state: present
 
+- name: Detect SELinux mode when Docker is run without the security role
+  ansible.builtin.command: getenforce
+  register: docker_selinux_mode
+  changed_when: false
+  when: vps_selinux_enabled is not defined
+
+- name: Set Docker SELinux support from the current host mode
+  ansible.builtin.set_fact:
+    vps_selinux_enabled: "{{ docker_selinux_mode.stdout != 'Disabled' }}"
+  when: vps_selinux_enabled is not defined
+
 - name: Configure conservative Docker daemon defaults
   ansible.builtin.copy:
     dest: /etc/docker/daemon.json
@@ -33,7 +44,7 @@
       {
         "live-restore": true,
         "log-driver": "local",
-        "selinux-enabled": true
+        "selinux-enabled": {{ (vps_selinux_enabled | default(false)) | bool | lower }}
       }
   notify: Restart Docker
 

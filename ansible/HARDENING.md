@@ -5,7 +5,7 @@ This is the repository's baseline for a single AlmaLinux VPS. It is a practical 
 ## Managed controls
 
 - **SSH:** public-key authentication only; root login, password authentication, agent forwarding, X11 forwarding, and tunnel devices are disabled. TCP local forwarding remains available for admin tunnels. `MaxAuthTries` is 5 and login grace is 30 seconds. The allowed account list comes from local bootstrap configuration; the Ansible service key is constrained against TTY and forwarding.
-- **SELinux:** targeted policy is enforcing. The playbook stops if SELinux is disabled because enabling it safely requires a planned relabel and reboot.
+- **SELinux:** targeted policy is enforced when active. Images that boot with SELinux disabled continue without SELinux labels, and Docker disables its SELinux isolation option for compatibility. Enabling SELinux on such a host needs a planned permissive boot and filesystem relabel; choose an SELinux-enabled VPS image when possible.
 - **Host firewall:** firewalld is enabled. SSH, Pangolin web traffic, and the selected Pangolin tunnel ports are allowed. Docker-published ports need a separate review because Docker manages forwarding rules.
 - **Updates:** DNF Automatic installs security updates but does not reboot automatically. Schedule maintenance for kernel and service restarts.
 - **Docker:** installed from Docker's official RPM repository, with live restore and rotating local logs. Docker group membership and ComposeFlux's Docker socket are root-equivalent access.

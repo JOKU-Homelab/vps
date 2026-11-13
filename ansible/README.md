@@ -10,7 +10,9 @@ Run the installer as root on a fresh AlmaLinux VPS, using a release tag:
 curl -fsSL https://raw.githubusercontent.com/JOKU-Homelab/vps/main/install.sh | sudo bash -s -- --ref v1.0.0
 ```
 
-The installer asks for an administrator SSH public key, base domain, email address, and backup credentials. It writes a protected `/etc/vps/install.conf` recovery bundle and bootstrap values under `/etc/vps-bootstrap/`, installs Ansible collections, and runs [`initialize-vps.yml`](playbooks/initialize-vps.yml) locally. Ansible configures users, SSH, SELinux, firewalld, security updates, Docker, CrowdSec, backup tooling, and persistent service directories under `/opt`, then starts Pangolin and Infisical from tracked Compose files. A saved install config runs the same flow and restores the latest backup without prompts.
+The installer asks only for values missing from `/etc/vps/install.conf`; it saves each value as soon as it is accepted, so an interrupted setup can resume and later runs reuse the saved settings. An explicit partial `--config FILE` is also completed this way. A saved recovery bundle can restore the latest backup without prompts.
+
+The installer writes the protected recovery bundle and bootstrap values under `/etc/vps-bootstrap/`, installs Ansible collections, and runs [`initialize-vps.yml`](playbooks/initialize-vps.yml) locally. Ansible configures users, SSH, SELinux when active, firewalld, security updates, Docker, CrowdSec, backup tooling, and persistent service directories under `/opt`, then starts Pangolin and Infisical from tracked Compose files.
 
 Complete Pangolin's first-admin setup at `https://pangolin.YOUR_BASE_DOMAIN` and create a site for this host. Infisical's first account and machine identity require a one-time setup in its UI. Its setup port is bound to loopback; use an SSH tunnel from your workstation:
 

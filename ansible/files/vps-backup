@@ -175,7 +175,11 @@ resolve_restic_image
 
 case "$command" in
   init)
-    restic init
+    if restic snapshots >/dev/null 2>&1; then
+      printf 'Restic repository is already initialized.\n'
+    else
+      restic init
+    fi
     ;;
   backup)
     trap 'find "$STAGING_DIR/postgresql" -mindepth 1 -maxdepth 1 -type f -delete' EXIT

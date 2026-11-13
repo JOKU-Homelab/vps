@@ -27,7 +27,7 @@ Restic snapshots use an off-host object-storage repository. The repository inclu
 curl -fsSL https://raw.githubusercontent.com/JOKU-Homelab/vps/main/install.sh | sudo bash -s -- --config /root/install.conf
 ```
 
-The installer creates `/etc/vps/install.conf`, a root-only recovery bundle containing host settings, bootstrap credentials, and backup credentials. Keep a protected copy off-server. On a fresh AlmaLinux VPS, `install.sh --config install.conf` fetches the repository, installs the host, and restores the latest snapshot without prompts. See [backup and disaster recovery](stacks/backrest/README.md).
+The installer creates `/etc/vps/install.conf`, a root-only recovery bundle containing host settings, bootstrap credentials, and backup credentials. It accepts partial config files, saves each entered value immediately, and reuses the saved config on later runs. Keep a protected copy off-server. On a fresh AlmaLinux VPS, `install.sh --config install.conf` fetches the repository, installs the host, and restores the latest snapshot without prompts. See [backup and disaster recovery](stacks/backrest/README.md).
 
 ## Repository map
 
