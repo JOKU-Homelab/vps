@@ -1,0 +1,32 @@
+name: composeflux
+
+services:
+  composeflux:
+    image: ghcr.io/veerendra2/composeflux:v0.19.0
+    container_name: composeflux
+    restart: unless-stopped
+    env_file:
+      - ${BOOTSTRAP_DIR:-/etc/vps-bootstrap}/composeflux.env
+    environment:
+      GIT_INTERVAL: 5m
+      GIT_CLONE_PATH: /opt/vps/composeflux/repo
+      STACK_PATH: stacks
+      # The API is reachable over the Pangolin frontend network without a
+      # public host port. Configure this same address in ComposeFlux's env file.
+      INFISICAL_SITE_URL: http://infisical-api:8080
+      PRUNE_INTERVAL: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/vps/composeflux/repo:/opt/vps/composeflux/repo:z
+      # ComposeFlux resolves absolute env_file paths while loading discovered
+      # stacks. Keep this directory root-owned and read-only in the container.
+      - ${BOOTSTRAP_DIR:-/etc/vps-bootstrap}:/etc/vps-bootstrap:ro,z
+    security_opt:
+      - label=disable
+    networks:
+      - pangolin
+
+networks:
+  pangolin:
+    external: true
+    name: pangolin_frontend

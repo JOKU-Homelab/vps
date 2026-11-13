@@ -1,0 +1,68 @@
+name: databasement
+
+services:
+  databasement:
+    image: davidcrty/databasement:1.10.10
+    restart: unless-stopped
+    environment:
+      APP_URL: ${DATABASEMENT_URL:?Set DATABASEMENT_URL in Infisical}
+      APP_KEY: ${APP_KEY:?Set APP_KEY in Infisical}
+      APP_DEBUG: "false"
+      APP_DISPLAY_TIMEZONE: ${TZ:-UTC}
+      OAUTH_OIDC_ENABLED: "${OAUTH_OIDC_ENABLED:-false}"
+      OAUTH_OIDC_CLIENT_ID: "${OAUTH_OIDC_CLIENT_ID:-}"
+      OAUTH_OIDC_CLIENT_SECRET: "${OAUTH_OIDC_CLIENT_SECRET:-}"
+      OAUTH_OIDC_BASE_URL: "${OAUTH_OIDC_BASE_URL:-https://authentik.example.com/application/o/databasement/}"
+      OAUTH_OIDC_LABEL: "${OAUTH_OIDC_LABEL:-Authentik}"
+      OAUTH_AUTO_CREATE_USERS: "${OAUTH_AUTO_CREATE_USERS:-false}"
+      OAUTH_AUTO_LINK_BY_EMAIL: "${OAUTH_AUTO_LINK_BY_EMAIL:-true}"
+      MAIL_MAILER: smtp
+      MAIL_HOST: "${SMTP_HOST:-smtp.example.com}"
+      MAIL_PORT: "${SMTP_PORT:-465}"
+      MAIL_SCHEME: smtps
+      MAIL_USERNAME: "${SMTP_USERNAME:-}"
+      MAIL_PASSWORD: "${SMTP_PASSWORD:-}"
+      MAIL_FROM_ADDRESS: "${SMTP_FROM_ADDRESS:-noreply@example.com}"
+      MAIL_FROM_NAME: Databasement
+      DB_CONNECTION: sqlite
+      DB_DATABASE: /data/database.sqlite
+      ENABLE_QUEUE_WORKER: "true"
+    volumes:
+      - type: bind
+        source: /opt/vps/data/databasement
+        target: /data
+        bind:
+          create_host_path: false
+          selinux: Z
+      - type: bind
+        source: ${DATABASE_BACKUP_DIR:-/opt/vps/data/database-backups}
+        target: /backups
+        bind:
+          create_host_path: false
+          selinux: Z
+    labels:
+      - pangolin.public-resources.databasement.name=Databasement
+      - pangolin.public-resources.databasement.mode=http
+      - pangolin.public-resources.databasement.full-domain=${DATABASEMENT_DOMAIN:?Set DATABASEMENT_DOMAIN in Infisical}
+      - pangolin.public-resources.databasement.targets[0].method=http
+      - pangolin.public-resources.databasement.targets[0].hostname=databasement
+      - pangolin.public-resources.databasement.targets[0].port=2226
+      - pangolin.public-resources.databasement.auth.sso-enabled=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2226/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      default: {}
+      pangolin: {}
+      database-backups: {}
+
+networks:
+  pangolin:
+    external: true
+    name: pangolin_frontend
+  database-backups:
+    external: true
+    name: vps_database_backups

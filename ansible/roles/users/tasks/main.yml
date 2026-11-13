@@ -1,0 +1,52 @@
+---
+- name: Install sudo
+  ansible.builtin.package:
+    name: sudo
+    state: present
+
+- name: Ensure administrator group exists
+  ansible.builtin.group:
+    name: "{{ ansible_admin_group }}"
+    state: present
+
+- name: Ensure Docker group exists
+  ansible.builtin.group:
+    name: docker
+    state: present
+
+- name: Create configured user accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    comment: "{{ item.comment | default(omit) }}"
+    shell: "{{ item.shell | default('/usr/sbin/nologin') }}"
+    groups: "{{ item.groups | default([]) }}"
+    append: true
+    create_home: true
+    state: present
+  loop: "{{ vps_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Install configured SSH public keys
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.public_key }}"
+    key_options: "{{ item.key_options | default(omit) }}"
+    state: present
+    manage_dir: true
+  loop: "{{ vps_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Configure passwordless sudo for selected accounts
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ item.name }}"
+    content: "{{ item.name }} ALL=(ALL) NOPASSWD: ALL\n"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+  loop: "{{ vps_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.passwordless_sudo | default(false)

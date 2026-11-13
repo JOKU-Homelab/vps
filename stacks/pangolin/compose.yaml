@@ -1,0 +1,87 @@
+name: pangolin
+
+services:
+  pangolin:
+    image: fosrl/pangolin:ee-1.25.3
+    container_name: pangolin
+    restart: unless-stopped
+    environment:
+      SERVER_SECRET: ${SERVER_SECRET:?Set SERVER_SECRET in the root-only Pangolin bootstrap env}
+    volumes:
+      - /opt/pangolin/config:/app/config:z
+      - type: bind
+        source: /opt/pangolin/data/runtime
+        target: /var/certificates
+        bind:
+          create_host_path: false
+          selinux: z
+      - type: bind
+        source: /opt/pangolin/data/runtime
+        target: /var/dynamic
+        bind:
+          create_host_path: false
+          selinux: z
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/v1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks:
+      - frontend
+
+  gerbil:
+    image: fosrl/gerbil:1.5.0
+    container_name: gerbil
+    restart: unless-stopped
+    depends_on:
+      pangolin:
+        condition: service_healthy
+    command:
+      - --reachableAt=http://gerbil:3004
+      - --generateAndSaveKeyTo=/var/config/key
+      - --remoteConfig=http://pangolin:3001/api/v1/
+    volumes:
+      - /opt/pangolin/config:/var/config:z
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    ports:
+      - "51820:51820/udp"
+      - "21820:21820/udp"
+      - "443:443/tcp"
+      - "80:80/tcp"
+    networks:
+      - frontend
+
+  traefik:
+    image: traefik:v3.7.16
+    container_name: traefik
+    restart: unless-stopped
+    network_mode: service:gerbil
+    depends_on:
+      pangolin:
+        condition: service_healthy
+    command:
+      - --configFile=/etc/traefik/traefik_config.yml
+    volumes:
+      - /opt/pangolin/config/traefik:/etc/traefik:ro,z
+      - /opt/pangolin/config/letsencrypt:/letsencrypt:z
+      - type: bind
+        source: /opt/pangolin/data/runtime
+        target: /var/certificates
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
+      - type: bind
+        source: /opt/pangolin/data/runtime
+        target: /var/dynamic
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
+
+networks:
+  frontend:
+    name: pangolin_frontend
+    driver: bridge

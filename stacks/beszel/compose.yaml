@@ -1,0 +1,33 @@
+services:
+  hub:
+    image: henrygd/beszel:0.21.1
+    restart: unless-stopped
+    labels:
+      - pangolin.public-resources.beszel.name=Beszel
+      - pangolin.public-resources.beszel.mode=http
+      - pangolin.public-resources.beszel.full-domain=${BESZEL_DOMAIN:?Set BESZEL_DOMAIN in Infisical}
+      - pangolin.public-resources.beszel.targets[0].method=http
+      - pangolin.public-resources.beszel.targets[0].hostname=beszel-hub
+      - pangolin.public-resources.beszel.targets[0].port=8090
+      - pangolin.public-resources.beszel.auth.sso-enabled=true
+      # Beszel agents authenticate at the application layer on this WebSocket endpoint.
+      - pangolin.public-resources.beszel.rules[0].action=allow
+      - pangolin.public-resources.beszel.rules[0].match=path
+      - pangolin.public-resources.beszel.rules[0].value=/api/beszel/agent-connect*
+    ports:
+      - "127.0.0.1:${BESZEL_PORT:-8090}:8090"
+    volumes:
+      - ${BESZEL_DATA_DIR:-/opt/vps/data/beszel}:/beszel_data:z
+    environment:
+      APP_URL: ${BESZEL_URL:?Set BESZEL_URL in Infisical}
+      USER_CREATION: true
+    networks:
+      default: {}
+      pangolin:
+        aliases:
+          - beszel-hub
+
+networks:
+  pangolin:
+    external: true
+    name: pangolin_frontend

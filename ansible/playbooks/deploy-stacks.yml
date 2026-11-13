@@ -1,0 +1,72 @@
+---
+- name: Bootstrap ComposeFlux GitOps agent
+  hosts: vps
+  become: true
+  vars:
+    composeflux_root: /opt/vps/composeflux
+
+  tasks:
+    - name: Ensure ComposeFlux directory exists
+      ansible.builtin.file:
+        path: "{{ composeflux_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Check ComposeFlux age passphrase file exists
+      ansible.builtin.stat:
+        path: "{{ composeflux_root }}/.env"
+      register: composeflux_env_file
+
+    - name: Check ComposeFlux GitHub deploy key exists
+      ansible.builtin.stat:
+        path: "{{ composeflux_root }}/deploy_key"
+      register: composeflux_deploy_key
+
+    - name: Require ComposeFlux secrets to be installed on the VPS
+      ansible.builtin.assert:
+        that:
+          - composeflux_env_file.stat.exists
+          - composeflux_env_file.stat.mode == '0600'
+          - composeflux_env_file.stat.uid == 0
+          - composeflux_deploy_key.stat.exists
+          - composeflux_deploy_key.stat.mode == '0600'
+          - composeflux_deploy_key.stat.uid == 0
+        fail_msg: >-
+          Install {{ composeflux_root }}/.env (AGE_PASSPHRASE) and
+          {{ composeflux_root }}/deploy_key first. Both files must have mode 0600.
+
+    - name: Confirm Pangolin's shared Docker network exists
+      ansible.builtin.command: docker network inspect pangolin_frontend
+      changed_when: false
+
+    - name: Create ComposeFlux directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      loop:
+        - "{{ composeflux_root }}"
+        - "{{ composeflux_root }}/repo"
+
+    - name: Install ComposeFlux Compose definition
+      ansible.builtin.copy:
+        src: ../../composeflux/compose.yaml
+        dest: "{{ composeflux_root }}/compose.yaml"
+        owner: root
+        group: root
+        mode: "0640"
+
+    - name: Validate ComposeFlux Compose configuration
+      ansible.builtin.command: docker compose config --quiet
+      args:
+        chdir: "{{ composeflux_root }}"
+      changed_when: false
+
+    - name: Start ComposeFlux
+      ansible.builtin.command: docker compose up -d
+      args:
+        chdir: "{{ composeflux_root }}"

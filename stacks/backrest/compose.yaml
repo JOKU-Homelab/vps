@@ -1,0 +1,46 @@
+services:
+  backrest:
+    image: ghcr.io/garethgeorge/backrest:v1.14.1
+    container_name: backrest
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      BACKREST_DATA: /data
+      BACKREST_CONFIG: /config/config.json
+      XDG_CACHE_HOME: /cache
+      TMPDIR: /tmp
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /opt/vps/data/backrest/data:/data:Z
+      - /opt/vps/data/backrest/config:/config:Z
+      - /opt/vps/data/backrest/cache:/cache:Z
+      - /opt/vps/data/backrest/tmp:/tmp:Z
+      - /opt:/source/opt:ro
+      - /opt/vps/backup/staging:/source/prepared-backups:ro
+    security_opt:
+      - label=disable
+    labels:
+      - pangolin.public-resources.backrest.name=Backrest
+      - pangolin.public-resources.backrest.mode=http
+      - pangolin.public-resources.backrest.full-domain=${BACKREST_DOMAIN:?Set BACKREST_DOMAIN in Infisical}
+      - pangolin.public-resources.backrest.targets[0].method=http
+      - pangolin.public-resources.backrest.targets[0].hostname=backrest
+      - pangolin.public-resources.backrest.targets[0].port=9898
+      - pangolin.public-resources.backrest.auth.sso-enabled=true
+    networks:
+      - pangolin
+
+  restic-cli:
+    image: restic/restic:0.19.1
+    profiles:
+      - backup-cli
+    entrypoint: ["restic"]
+    restart: "no"
+    # Used only by /usr/local/sbin/vps-backup. The profile keeps this utility
+    # image out of the normal Backrest deployment while allowing Renovate to
+    # update its pinned version in the same Compose source of truth.
+
+networks:
+  pangolin:
+    external: true
+    name: pangolin_frontend

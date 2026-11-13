@@ -1,0 +1,18 @@
+services:
+  renovate:
+    image: renovate/renovate:44.227.4
+    restart: unless-stopped
+    init: true
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          renovate
+          sleep 600
+        done
+    environment:
+      RENOVATE_PLATFORM: github
+      RENOVATE_AUTODISCOVER: "false"
+      RENOVATE_REPOSITORIES: ${RENOVATE_REPOSITORIES:?Set RENOVATE_REPOSITORIES in Infisical}
+      RENOVATE_TOKEN: ${RENOVATE_TOKEN:?Set RENOVATE_TOKEN in Infisical}
+      LOG_LEVEL: info

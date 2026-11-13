@@ -1,0 +1,12 @@
+---
+# Run only after verifying key-based access for sa_ansible.
+- name: Configure VPS
+  hosts: vps
+  become: true
+  roles:
+    - users
+    - ssh
+    - security
+    - system_updates
+    - docker
+    - backup

@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly CONFIG_FILE="${VPS_BACKUP_CONFIG:-/etc/vps/backup.env}"
+readonly PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-/etc/vps/restic-password}"
+readonly STAGING_DIR="${VPS_BACKUP_STAGING:-/opt/vps/backup/staging}"
+COMPOSE_FILE="${VPS_BACKUP_COMPOSE_FILE:-}"
+readonly DOCKER_BIN="${DOCKER_BIN:-docker}"
+RESTIC_IMAGE=""
+
+usage() {
+  cat <<'EOF'
+Usage:
+  vps-backup init
+  vps-backup backup
+  vps-backup snapshots
+  vps-backup check [--read-data]
+  vps-backup restore SNAPSHOT EMPTY_TARGET_DIRECTORY
+  vps-backup restore-host SNAPSHOT
+
+Configuration is read from /etc/vps/backup.env (root-owned mode 0600).
+The Restic password is read from /etc/vps/restic-password (root-owned mode 0600).
+EOF
+}
+
+fail() { printf 'vps-backup: %s\n' "$*" >&2; exit 1; }
+
+load_config() {
+  [[ -f "$CONFIG_FILE" ]] || fail "missing $CONFIG_FILE"
+  [[ -f "$PASSWORD_FILE" ]] || fail "missing $PASSWORD_FILE"
+  [[ "$(stat -c '%u:%a' "$CONFIG_FILE")" == '0:600' ]] || fail "$CONFIG_FILE must be root-owned mode 0600"
+  [[ "$(stat -c '%u:%a' "$PASSWORD_FILE")" == '0:600' ]] || fail "$PASSWORD_FILE must be root-owned mode 0600"
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+  : "${RESTIC_REPOSITORY:?Set RESTIC_REPOSITORY in $CONFIG_FILE}"
+  : "${B2_ACCOUNT_ID:?Set B2_ACCOUNT_ID in $CONFIG_FILE}"
+  : "${B2_ACCOUNT_KEY:?Set B2_ACCOUNT_KEY in $CONFIG_FILE}"
+  export RESTIC_REPOSITORY B2_ACCOUNT_ID B2_ACCOUNT_KEY
+}
+
+resolve_restic_image() {
+  if [[ -z "$COMPOSE_FILE" ]]; then
+    if [[ -f /opt/vps/composeflux/repo/stacks/backrest/compose.yaml ]]; then
+      COMPOSE_FILE=/opt/vps/composeflux/repo/stacks/backrest/compose.yaml
+    else
+      COMPOSE_FILE=/opt/vps/repo/stacks/backrest/compose.yaml
+    fi
+  fi
+  [[ -f "$COMPOSE_FILE" ]] || fail "missing Restic image declaration at $COMPOSE_FILE"
+  RESTIC_IMAGE="$(BACKREST_DOMAIN="${BACKREST_DOMAIN:-backups.example.invalid}" \
+    "$DOCKER_BIN" compose --profile backup-cli -f "$COMPOSE_FILE" config --images \
+    | awk '/^restic\/restic:/ { print; exit }')"
+  [[ -n "$RESTIC_IMAGE" ]] || fail "no restic/restic image found in $COMPOSE_FILE"
+}
+
+restic() {
+  "$DOCKER_BIN" run --rm \
+    --security-opt label=disable \
+    --env RESTIC_REPOSITORY \
+    --env B2_ACCOUNT_ID \
+    --env B2_ACCOUNT_KEY \
+    --env RESTIC_PASSWORD_FILE=/run/secrets/restic-password \
+    --mount "type=bind,src=$PASSWORD_FILE,dst=/run/secrets/restic-password,readonly" \
+    --mount "type=bind,src=$STAGING_DIR,dst=/staging" \
+    --mount type=bind,src=/,dst=/host,readonly \
+    "$RESTIC_IMAGE" "$@"
+}
+
+prepare_postgres_dumps() {
+  mkdir -p "$STAGING_DIR/postgresql"
+  chmod 0700 "$STAGING_DIR" "$STAGING_DIR/postgresql"
+  find "$STAGING_DIR/postgresql" -mindepth 1 -maxdepth 1 -type f -delete
+
+  local name image dump_name
+  while IFS=$'\t' read -r name image; do
+    [[ -n "$name" ]] || continue
+    case "$image" in
+      *postgres*) ;;
+      *) continue ;;
+    esac
+
+    dump_name="${name#/}"
+    dump_name="${dump_name//[^a-zA-Z0-9_.-]/_}"
+    printf 'Exporting PostgreSQL container %s\n' "$name"
+    if ! "$DOCKER_BIN" exec "$name" sh -ec 'pg_dumpall -U "${POSTGRES_USER:-postgres}"' > "$STAGING_DIR/postgresql/${dump_name}.sql"; then
+      rm -f "$STAGING_DIR/postgresql/${dump_name}.sql"
+      fail "PostgreSQL export failed for $name; no backup snapshot was created"
+    fi
+    [[ -s "$STAGING_DIR/postgresql/${dump_name}.sql" ]] || fail "PostgreSQL export was empty for $name"
+  done < <("$DOCKER_BIN" ps --format '{{.Names}}\t{{.Image}}')
+}
+
+restore_host() {
+  local snapshot="${1:-}" confirmation="${2:-}" restore_id restore_root source_root answer
+  [[ -n "$snapshot" ]] || { usage >&2; exit 2; }
+  if [[ "$confirmation" != '--yes' ]]; then
+    [[ -r /dev/tty ]] || fail 'restore-host requires an interactive terminal unless --yes is supplied'
+  fi
+  restore_id="$(date -u +%Y%m%dT%H%M%SZ)"
+  restore_root="$STAGING_DIR/restore-$restore_id"
+  mkdir -p "$restore_root"
+  chmod 0700 "$restore_root"
+
+  printf 'Restoring snapshot %s to a protected staging directory.\n' "$snapshot"
+  restic restore "$snapshot" --target "/staging/restore-$restore_id"
+  source_root="$restore_root/host"
+  [[ -d "$source_root/opt" ]] || fail 'snapshot does not contain the expected /opt tree'
+  [[ -f "$source_root/etc/vps-bootstrap/infisical.env" ]] || fail 'snapshot does not contain Infisical bootstrap credentials'
+  rm -rf -- "$source_root/opt/vps/repo" "$source_root/opt/vps/composeflux/repo"
+
+  cat >&2 <<'NOTICE'
+This will stop Docker and replace service data under /opt.
+It restores the old Infisical and Pangolin bootstrap credentials, while keeping
+the new host's SSH/user config. Run this only on a replacement VPS before
+starting its Compose services.
+NOTICE
+  if [[ "$confirmation" == '--yes' ]]; then
+    printf 'Proceeding with unattended restore as requested.\n'
+  else
+    read -r -p 'Type RESTORE to continue: ' answer </dev/tty
+    [[ "$answer" == RESTORE ]] || fail 'restore cancelled; staged data remains at the path printed below'
+  fi
+
+  printf 'Stopping containers and Docker...\n'
+  "$DOCKER_BIN" ps -q | xargs -r "$DOCKER_BIN" stop
+  systemctl stop docker
+
+  mkdir -p /opt /etc/vps-bootstrap
+  cp -a "$source_root/opt/." /opt/
+  for bootstrap_file in infisical.env pangolin.env composeflux.env; do
+    if [[ -f "$source_root/etc/vps-bootstrap/$bootstrap_file" ]]; then
+      install -o root -g root -m 0600 \
+        "$source_root/etc/vps-bootstrap/$bootstrap_file" \
+        "/etc/vps-bootstrap/$bootstrap_file"
+    fi
+  done
+
+  systemctl start docker
+  printf 'Host data restored. Start services from the repository after checking the restored bootstrap files.\n'
+  printf 'PostgreSQL logical exports are available under %s/staging/postgresql.\n' "$restore_root"
+  printf 'Review and remove the protected staging directory when recovery is complete: %s\n' "$restore_root"
+}
+
+restore_snapshot() {
+  local snapshot="${1:-}" target="${2:-}" canonical_target
+  [[ -n "$snapshot" && -n "$target" ]] || { usage >&2; exit 2; }
+  [[ "$target" == /* ]] || fail 'restore target must be an absolute path'
+  [[ "$target" != '/' ]] || fail 'refusing to restore directly into /'
+  mkdir -p -- "$target"
+  canonical_target="$(realpath -e -- "$target")"
+  [[ "$canonical_target" != '/' ]] || fail 'refusing to restore directly into /'
+  [[ -d "$canonical_target" ]] || fail 'restore target must be a directory'
+  [[ -z "$(find "$canonical_target" -mindepth 1 -maxdepth 1 -print -quit)" ]] || fail 'restore target must be empty; choose a new directory'
+  "$DOCKER_BIN" run --rm \
+    --security-opt label=disable \
+    --env RESTIC_REPOSITORY \
+    --env B2_ACCOUNT_ID \
+    --env B2_ACCOUNT_KEY \
+    --env RESTIC_PASSWORD_FILE=/run/secrets/restic-password \
+    --mount "type=bind,src=$PASSWORD_FILE,dst=/run/secrets/restic-password,readonly" \
+    --mount "type=bind,src=$canonical_target,dst=/restore" \
+    "$RESTIC_IMAGE" restore "$snapshot" --target /restore
+}
+
+command="${1:-}"
+case "$command" in
+  -h|--help|help) usage; exit 0 ;;
+  '') usage >&2; exit 2 ;;
+esac
+
+load_config
+resolve_restic_image
+"$DOCKER_BIN" image inspect "$RESTIC_IMAGE" >/dev/null 2>&1 || "$DOCKER_BIN" pull "$RESTIC_IMAGE"
+
+case "$command" in
+  init)
+    restic init
+    ;;
+  backup)
+    trap 'find "$STAGING_DIR/postgresql" -mindepth 1 -maxdepth 1 -type f -delete' EXIT
+    prepare_postgres_dumps
+    restic backup \
+      --host "$(hostname -f 2>/dev/null || hostname)" \
+      --tag vps \
+      --tag "os:$(. /etc/os-release && printf '%s' "${ID:-linux}")" \
+      --exclude /host/etc/vps/backup.env \
+      --exclude /host/etc/vps/restic-password \
+      --exclude /host/etc/vps/install.conf \
+      --exclude /host/opt/vps/repo \
+      --exclude /host/opt/vps/composeflux/repo \
+      --exclude /host/opt/vps/backup/staging \
+      /host/opt \
+      /host/etc/vps \
+      /host/etc/vps-bootstrap \
+      /staging/postgresql
+    restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune
+    ;;
+  snapshots)
+    restic snapshots
+    ;;
+  check)
+    if [[ "${2:-}" == '--read-data' ]]; then
+      restic check --read-data
+    else
+      restic check
+    fi
+    ;;
+  restore)
+    restore_snapshot "${2:-}" "${3:-}"
+    ;;
+  restore-host)
+    restore_host "${2:-}" "${3:-}"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

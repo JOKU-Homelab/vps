@@ -1,0 +1,106 @@
+---
+- name: Ensure sshd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Ensure Ansible state directory exists
+  ansible.builtin.file:
+    path: /var/lib/ansible
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Load managed SSH hardening settings before other directives
+  ansible.builtin.blockinfile:
+    path: /etc/ssh/sshd_config
+    insertbefore: BOF
+    marker: '# {mark} ANSIBLE VPS SSH HARDENING'
+    block: Include /etc/ssh/sshd_config.d/00-vps-hardening.conf
+  register: sshd_include_result
+
+- name: Configure public-key-only SSH authentication
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/00-vps-hardening.conf
+    content: |
+      PubkeyAuthentication yes
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      PermitEmptyPasswords no
+      MaxAuthTries 5
+      LoginGraceTime 30
+      X11Forwarding no
+      AllowAgentForwarding no
+      AllowTcpForwarding local
+      PermitTunnel no
+      AllowUsers {{ vps_users | map(attribute='name') | join(' ') }}
+    owner: root
+    group: root
+    mode: '0644'
+  register: sshd_dropin_result
+
+- name: Clear applied marker when SSH configuration changes
+  ansible.builtin.file:
+    path: /var/lib/ansible/ssh-hardening-applied
+    state: absent
+  when: sshd_include_result.changed or sshd_dropin_result.changed
+
+- name: Validate sshd configuration syntax
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+
+- name: Read effective SSH authentication settings
+  ansible.builtin.command: /usr/sbin/sshd -T
+  register: sshd_effective_config
+  changed_when: false
+
+- name: Confirm SSH account allowlist is configured
+  ansible.builtin.command: >-
+    grep -Fx 'AllowUsers {{ vps_users | map(attribute="name") | join(" ") }}'
+    /etc/ssh/sshd_config.d/00-vps-hardening.conf
+  changed_when: false
+
+- name: Confirm key-only SSH settings are effective
+  ansible.builtin.assert:
+    that:
+      - "'pubkeyauthentication yes' in sshd_effective_config.stdout_lines"
+      - "'passwordauthentication no' in sshd_effective_config.stdout_lines"
+      - "'kbdinteractiveauthentication no' in sshd_effective_config.stdout_lines"
+      - "'permitrootlogin no' in sshd_effective_config.stdout_lines"
+      - "'permitemptypasswords no' in sshd_effective_config.stdout_lines"
+      - "'maxauthtries 5' in sshd_effective_config.stdout_lines"
+      - "'logingracetime 30' in sshd_effective_config.stdout_lines"
+      - "'x11forwarding no' in sshd_effective_config.stdout_lines"
+      - "'allowagentforwarding no' in sshd_effective_config.stdout_lines"
+      - "'allowtcpforwarding local' in sshd_effective_config.stdout_lines"
+      - "'permittunnel no' in sshd_effective_config.stdout_lines"
+    fail_msg: >-
+      sshd did not load the expected authentication and session settings. The SSH daemon has not
+      been restarted; inspect /etc/ssh/sshd_config and its Include directives.
+
+- name: Check whether validated SSH settings have been applied
+  ansible.builtin.stat:
+    path: /var/lib/ansible/ssh-hardening-applied
+  register: ssh_hardening_applied
+
+- name: Restart SSH after validating the key-only settings
+  ansible.builtin.service:
+    name: "{{ 'ssh' if ansible_facts.os_family == 'Debian' else 'sshd' }}"
+    state: restarted
+  when: not ssh_hardening_applied.stat.exists
+
+- name: Mark validated SSH settings as applied
+  ansible.builtin.file:
+    path: /var/lib/ansible/ssh-hardening-applied
+    state: touch
+    owner: root
+    group: root
+    mode: '0600'
+    access_time: preserve
+    modification_time: preserve
+  when: not ssh_hardening_applied.stat.exists

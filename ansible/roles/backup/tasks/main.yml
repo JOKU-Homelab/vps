@@ -1,0 +1,69 @@
+---
+- name: Ensure backup staging directory exists
+  ansible.builtin.file:
+    path: /opt/vps/backup/staging
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install backup and recovery command
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../files/vps-backup"
+    dest: /usr/local/sbin/vps-backup
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Install backup systemd service
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../files/vps-backup.service"
+    dest: /etc/systemd/system/vps-backup.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Install backup systemd timer
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../files/vps-backup.timer"
+    dest: /etc/systemd/system/vps-backup.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Check whether backup credentials have been provisioned
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/vps/backup.env
+    - /etc/vps/restic-password
+  register: backup_credential_files
+
+- name: Validate provisioned backup credential permissions
+  ansible.builtin.assert:
+    that:
+      - item.stat.pw_name == 'root'
+      - item.stat.mode == '0600'
+    fail_msg: "{{ item.item }} must be a root-owned file with mode 0600."
+  loop: "{{ backup_credential_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+
+- name: Enable daily backups after credentials are installed
+  ansible.builtin.systemd:
+    name: vps-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: backup_credential_files.results | selectattr('stat.exists') | list | length == 2
+
+- name: Keep daily backups disabled until credentials are installed
+  ansible.builtin.systemd:
+    name: vps-backup.timer
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when: backup_credential_files.results | selectattr('stat.exists') | list | length != 2

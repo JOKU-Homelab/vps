@@ -1,0 +1,22 @@
+---
+ansible_admin_group: wheel
+
+# Copy and customize these example accounts in a local host_vars file before
+# bootstrap. Never commit real SSH keys or usernames identifying an operator.
+vps_users:
+  - name: sa_ansible
+    comment: Ansible service account
+    shell: /bin/bash
+    groups:
+      - wheel
+    public_key: REPLACE_WITH_ADMIN_SSH_PUBLIC_KEY
+    key_options: no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding
+    passwordless_sudo: true
+  - name: operator
+    comment: VPS operator
+    shell: /bin/bash
+    groups:
+      - wheel
+      - docker
+    public_key: REPLACE_WITH_OPERATOR_SSH_PUBLIC_KEY
+    passwordless_sudo: true

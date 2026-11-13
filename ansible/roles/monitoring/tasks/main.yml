@@ -1,0 +1,4 @@
+---
+# Beszel deployment belongs in a Compose stack managed by ComposeFlux.
+# Keep host-level monitoring configuration here only if it becomes necessary.
+[]

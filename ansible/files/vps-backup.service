@@ -1,0 +1,28 @@
+[Unit]
+Description=Create an encrypted off-host VPS backup
+After=docker.service
+Requires=docker.service
+ConditionPathExists=/etc/vps/backup.env
+ConditionPathExists=/etc/vps/restic-password
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/vps-backup backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/opt/vps/backup
+ReadOnlyPaths=/etc/vps /etc/vps-bootstrap /opt
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true

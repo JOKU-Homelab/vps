@@ -1,0 +1,6 @@
+---
+- name: Configure unattended security updates
+  hosts: vps
+  become: true
+  roles:
+    - system_updates

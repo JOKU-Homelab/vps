@@ -1,0 +1,7 @@
+---
+# Run once with root SSH access to create the human and Ansible accounts.
+- name: Bootstrap VPS access
+  hosts: vps
+  become: true
+  roles:
+    - users

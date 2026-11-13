@@ -1,0 +1,179 @@
+---
+- name: Install firewalld and SELinux management tools
+  ansible.builtin.package:
+    name:
+      - firewalld
+      - policycoreutils-python-utils
+      - python3-libselinux
+    state: present
+
+- name: Check current SELinux mode
+  ansible.builtin.command: getenforce
+  register: selinux_current_mode
+  changed_when: false
+
+- name: Require an enabled SELinux installation
+  ansible.builtin.assert:
+    that:
+      - selinux_current_mode.stdout != 'Disabled'
+    fail_msg: >-
+      SELinux is disabled. Enabling it safely requires a filesystem relabel and
+      reboot; handle that maintenance separately before applying this playbook.
+
+- name: Enforce SELinux policy
+  ansible.posix.selinux:
+    policy: targeted
+    state: enforcing
+
+- name: Enable firewalld while preserving existing firewall rules
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+
+- name: Keep SSH reachable in firewalld's default zone
+  ansible.posix.firewalld:
+    service: ssh
+    state: enabled
+    permanent: true
+    immediate: true
+
+- name: Allow Pangolin web and tunnel traffic in firewalld's default zone
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop:
+    - 80/tcp
+    - 443/tcp
+    - 51820/udp
+    - 21820/udp
+
+- name: Configure the official CrowdSec RPM repository
+  ansible.builtin.yum_repository:
+    name: crowdsec_crowdsec
+    description: CrowdSec stable RPM repository
+    baseurl: https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any/$basearch
+    enabled: true
+    repo_gpgcheck: true
+    gpgcheck: true
+    gpgkey: |
+      https://packagecloud.io/crowdsec/crowdsec/gpgkey
+      https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-C822EDD6B39954A1.pub.gpg
+      https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-FED78314A2468CCF.pub.gpg
+    sslverify: true
+
+- name: Install CrowdSec detection and nftables remediation packages
+  ansible.builtin.dnf:
+    name:
+      - crowdsec
+      - crowdsec-firewall-bouncer-nftables
+    state: present
+
+- name: Configure CrowdSec to read SSH authentication events from journald
+  ansible.builtin.copy:
+    dest: /etc/crowdsec/acquis.d/sshd.yaml
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      source: journalctl
+      journalctl_filter:
+        - "_SYSTEMD_UNIT=sshd.service"
+      labels:
+        type: syslog
+
+- name: Install the CrowdSec SSH parser and scenarios
+  ansible.builtin.command: cscli collections install crowdsecurity/sshd
+  register: crowdsec_ssh_collection
+  changed_when: "'already installed' not in crowdsec_ssh_collection.stdout | lower"
+
+- name: Ensure CrowdSec Local API is enabled
+  ansible.builtin.service:
+    name: crowdsec
+    state: started
+    enabled: true
+
+- name: Ensure CrowdSec bouncer configuration directory exists
+  ansible.builtin.file:
+    path: /etc/crowdsec/bouncers
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Check whether the managed CrowdSec firewall bouncer key exists
+  ansible.builtin.stat:
+    path: /etc/crowdsec/bouncers/vps-firewall-bouncer.key
+  register: crowdsec_bouncer_key_file
+
+- name: Generate a persistent key for the CrowdSec firewall bouncer
+  ansible.builtin.command: openssl rand -hex 32
+  register: crowdsec_bouncer_key_generated
+  changed_when: false
+  no_log: true
+  when: not crowdsec_bouncer_key_file.stat.exists
+
+- name: Store the CrowdSec firewall bouncer key
+  ansible.builtin.copy:
+    dest: /etc/crowdsec/bouncers/vps-firewall-bouncer.key
+    content: "{{ crowdsec_bouncer_key_generated.stdout }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  when: not crowdsec_bouncer_key_file.stat.exists
+
+- name: Read the persistent CrowdSec firewall bouncer key
+  ansible.builtin.slurp:
+    src: /etc/crowdsec/bouncers/vps-firewall-bouncer.key
+  register: crowdsec_bouncer_key_content
+  no_log: true
+
+- name: Check registered CrowdSec bouncers
+  ansible.builtin.command: cscli bouncers list
+  register: crowdsec_bouncers
+  changed_when: false
+  retries: 10
+  delay: 2
+  until: crowdsec_bouncers.rc == 0
+  no_log: true
+
+- name: Register the CrowdSec firewall bouncer with the Local API
+  ansible.builtin.command:
+    argv:
+      - cscli
+      - bouncers
+      - add
+      - vps-firewall-bouncer
+      - --key
+      - "{{ crowdsec_bouncer_key_content.content | b64decode | trim }}"
+  no_log: true
+  when: "'vps-firewall-bouncer' not in crowdsec_bouncers.stdout"
+
+- name: Configure the CrowdSec firewall bouncer
+  ansible.builtin.copy:
+    dest: /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
+    owner: root
+    group: root
+    mode: '0600'
+    content: |
+      mode: nftables
+      api_url: http://127.0.0.1:8080/
+      api_key: {{ crowdsec_bouncer_key_content.content | b64decode | trim }}
+      update_frequency: 10s
+      nftables:
+        ipv4:
+          enabled: true
+          set-only: false
+        ipv6:
+          enabled: true
+          set-only: false
+  no_log: true
+
+- name: Enable CrowdSec firewall remediation
+  ansible.builtin.service:
+    name: crowdsec-firewall-bouncer
+    state: started
+    enabled: true

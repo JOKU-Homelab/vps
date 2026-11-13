@@ -1,0 +1,11 @@
+[Unit]
+Description=Run encrypted VPS backups daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=45m
+Persistent=true
+Unit=vps-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,48 @@
+api:
+  insecure: false
+  dashboard: false
+
+providers:
+  file:
+    directory: /var/dynamic
+    watch: true
+
+experimental:
+  plugins:
+    badger:
+      moduleName: github.com/fosrl/badger
+      version: v1.8.0
+
+log:
+  level: INFO
+  format: common
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+    proxyProtocol:
+      trustedIPs:
+        - 127.0.0.1/32
+        - ::1/128
+    transport:
+      respondingTimeouts:
+        readTimeout: 30m
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "{{ vps_admin_email }}"
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web
+
+serversTransport:
+  insecureSkipVerify: true
+
+ping:
+  entryPoint: web

@@ -1,0 +1,118 @@
+name: authentik
+
+services:
+  postgresql:
+    image: postgres:16.15-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DB:-authentik}
+      POSTGRES_USER: ${PG_USER:-authentik}
+      POSTGRES_PASSWORD: ${PG_PASS:?Set PG_PASS in Infisical}
+    volumes:
+      - type: bind
+        source: /opt/vps/data/authentik/postgresql
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+          selinux: Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      default: {}
+      database-backups:
+        aliases:
+          - authentik-postgresql
+
+  server:
+    image: ghcr.io/goauthentik/server:2026.8.5
+    command: server
+    restart: unless-stopped
+    shm_size: 512mb
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment: &authentik-environment
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS:?Set PG_PASS in Infisical}
+      AUTHENTIK_POSTGRESQL__USER: ${PG_USER:-authentik}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?Set AUTHENTIK_SECRET_KEY in Infisical}
+      AUTHENTIK_WEB__BASE_URL: ${AUTHENTIK_URL:?Set AUTHENTIK_URL in Infisical}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_EMAIL__HOST: "${SMTP_HOST:-smtp.example.com}"
+      AUTHENTIK_EMAIL__PORT: "${SMTP_PORT:-465}"
+      AUTHENTIK_EMAIL__USERNAME: "${SMTP_USERNAME:-}"
+      AUTHENTIK_EMAIL__PASSWORD: "${SMTP_PASSWORD:-}"
+      AUTHENTIK_EMAIL__USE_TLS: "false"
+      AUTHENTIK_EMAIL__USE_SSL: "true"
+      AUTHENTIK_EMAIL__FROM: "${SMTP_FROM_ADDRESS:-noreply@example.com}"
+    expose:
+      - "9000"
+    volumes:
+      - type: bind
+        source: /opt/vps/data/authentik/data
+        target: /data
+        bind:
+          create_host_path: false
+          selinux: z
+      - type: bind
+        source: /opt/vps/data/authentik/templates
+        target: /templates
+        bind:
+          create_host_path: false
+          selinux: z
+    labels:
+      - pangolin.public-resources.authentik.name=Authentik
+      - pangolin.public-resources.authentik.mode=http
+      - pangolin.public-resources.authentik.full-domain=${AUTHENTIK_DOMAIN:?Set AUTHENTIK_DOMAIN in Infisical}
+      - pangolin.public-resources.authentik.targets[0].method=http
+      - pangolin.public-resources.authentik.targets[0].hostname=authentik-server
+      - pangolin.public-resources.authentik.targets[0].port=9000
+      # The IdP must remain reachable without its own SSO to avoid a login loop.
+      - pangolin.public-resources.authentik.auth.sso-enabled=false
+    networks:
+      default: {}
+      pangolin:
+        aliases:
+          - authentik-server
+
+  worker:
+    image: ghcr.io/goauthentik/server:2026.8.5
+    command: worker
+    restart: unless-stopped
+    shm_size: 512mb
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment: *authentik-environment
+    volumes:
+      - type: bind
+        source: /opt/vps/data/authentik/data
+        target: /data
+        bind:
+          create_host_path: false
+          selinux: z
+      - type: bind
+        source: /opt/vps/data/authentik/certs
+        target: /certs
+        bind:
+          create_host_path: false
+          selinux: Z
+      - type: bind
+        source: /opt/vps/data/authentik/templates
+        target: /templates
+        bind:
+          create_host_path: false
+          selinux: z
+
+networks:
+  pangolin:
+    external: true
+    name: pangolin_frontend
+  database-backups:
+    external: true
+    name: vps_database_backups

@@ -1,0 +1,6 @@
+---
+- name: Install Docker Engine and Compose
+  hosts: vps
+  become: true
+  roles:
+    - docker

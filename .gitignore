@@ -1,0 +1,20 @@
+# Ansible output and local configuration
+*.retry
+.ansible/
+
+# Local inventories and secrets
+ansible/inventory/local.yml
+ansible/inventory/*local*.yml
+vault-password-file
+*.vault-pass
+install.conf
+*.install.conf
+
+# Environment files used by Compose stacks
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+*.env.age
