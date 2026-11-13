@@ -188,6 +188,56 @@ for key in ("infisical_env","pangolin_env","composeflux_env"):
 PY
 fi
 
+infisical_backend_running=false
+if command -v docker >/dev/null 2>&1 && [[ "$(docker inspect -f '{{.State.Running}}' infisical-backend 2>/dev/null || true)" == true ]]; then
+  infisical_backend_running=true
+fi
+INFISICAL_BOOTSTRAP_PORT="$(python3 - "$BOOTSTRAP_DIR/infisical.env" "$infisical_backend_running" <<'PY'
+import pathlib, socket, sys
+path=pathlib.Path(sys.argv[1])
+running=sys.argv[2] == "true"
+existing=""
+if path.exists():
+    for line in path.read_text().splitlines():
+        if line.startswith("INFISICAL_BOOTSTRAP_PORT="):
+            existing=line.split("=",1)[1].strip()
+            break
+if existing:
+    if not existing.isdigit() or not 1024 <= int(existing) <= 65535:
+        raise SystemExit("INFISICAL_BOOTSTRAP_PORT must be a TCP port from 1024 to 65535")
+    if running:
+        print(existing); raise SystemExit(0)
+    candidates=[int(existing)]
+else:
+    candidates=[]
+candidates += [p for p in range(18080,18101) if p not in candidates]
+for port in candidates:
+    sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1",port))
+        print(port)
+        break
+    except OSError:
+        pass
+    finally:
+        sock.close()
+else:
+    raise SystemExit("No free Infisical bootstrap port found in 18080-18100; set INFISICAL_BOOTSTRAP_PORT manually")
+PY
+)" || die "Could not select a free loopback port for Infisical."
+python3 - "$BOOTSTRAP_DIR/infisical.env" "$INFISICAL_BOOTSTRAP_PORT" <<'PY'
+import os, pathlib, sys
+p=pathlib.Path(sys.argv[1]); key="INFISICAL_BOOTSTRAP_PORT"; value=sys.argv[2]
+lines=p.read_text().splitlines() if p.exists() else []
+found=False; output=[]
+for line in lines:
+    if line.startswith(key+"="):
+        output.append(f"{key}={value}"); found=True
+    else: output.append(line)
+if not found: output.append(f"{key}={value}")
+p.write_text("\n".join(output)+"\n"); p.chmod(0o600); os.chown(p,0,0)
+PY
+
 python3 - <<'PY'
 import base64, os, pathlib, secrets
 boot=pathlib.Path('/etc/vps-bootstrap')
@@ -262,6 +312,7 @@ fi
 cat <<DONE
 
 Initialization finished. Recovery bundle: $CONFIG_PATH (root-only mode 0600).
+Infisical bootstrap port: 127.0.0.1:$INFISICAL_BOOTSTRAP_PORT (forward this over SSH).
 Keep a protected copy off-server. A replacement VPS can be initialized without
 prompts using install.sh --config /path/to/install.conf.
 DONE

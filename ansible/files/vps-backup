@@ -92,7 +92,7 @@ prepare_postgres_dumps() {
 }
 
 restore_host() {
-  local snapshot="${1:-}" confirmation="${2:-}" restore_id restore_root source_root answer
+  local snapshot="${1:-}" confirmation="${2:-}" restore_id restore_root source_root answer bootstrap_port
   [[ -n "$snapshot" ]] || { usage >&2; exit 2; }
   if [[ "$confirmation" != '--yes' ]]; then
     [[ -r /dev/tty ]] || fail 'restore-host requires an interactive terminal unless --yes is supplied'
@@ -105,6 +105,8 @@ restore_host() {
   printf 'Restoring snapshot %s to a protected staging directory.\n' "$snapshot"
   restic restore "$snapshot" --target "/staging/restore-$restore_id"
   source_root="$restore_root/host"
+  bootstrap_port="$(awk -F= '$1 == "INFISICAL_BOOTSTRAP_PORT" {print $2; exit}' /etc/vps-bootstrap/infisical.env 2>/dev/null || true)"
+  [[ -z "$bootstrap_port" || "$bootstrap_port" =~ ^[0-9]{1,5}$ ]] || fail 'invalid local Infisical bootstrap port'
   [[ -d "$source_root/opt" ]] || fail 'snapshot does not contain the expected /opt tree'
   [[ -f "$source_root/etc/vps-bootstrap/infisical.env" ]] || fail 'snapshot does not contain Infisical bootstrap credentials'
   rm -rf -- "$source_root/opt/vps/repo" "$source_root/opt/vps/composeflux/repo"
@@ -135,6 +137,16 @@ NOTICE
         "/etc/vps-bootstrap/$bootstrap_file"
     fi
   done
+  if [[ -n "$bootstrap_port" ]]; then
+    local infisical_env=/etc/vps-bootstrap/infisical.env
+    if grep -q '^INFISICAL_BOOTSTRAP_PORT=' "$infisical_env"; then
+      sed -i "s/^INFISICAL_BOOTSTRAP_PORT=.*/INFISICAL_BOOTSTRAP_PORT=$bootstrap_port/" "$infisical_env"
+    else
+      printf 'INFISICAL_BOOTSTRAP_PORT=%s\n' "$bootstrap_port" >>"$infisical_env"
+    fi
+    chmod 0600 "$infisical_env"
+    chown root:root "$infisical_env"
+  fi
 
   systemctl start docker
   printf 'Host data restored. Start services from the repository after checking the restored bootstrap files.\n'

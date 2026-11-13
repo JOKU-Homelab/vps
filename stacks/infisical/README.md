@@ -8,7 +8,7 @@ Ansible creates the `pangolin_frontend` Docker network, installs the root-only b
 
 The file must contain the keys in [`bootstrap.env.example`](bootstrap.env.example), with generated values. Create and retain secure off-host copies of `ENCRYPTION_KEY`, `AUTH_SECRET`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD`. Losing `ENCRYPTION_KEY` makes the secrets stored in the Infisical database unrecoverable. The PostgreSQL database and its encryption key must be backed up together.
 
-Before the identity provider is deployed, the Pangolin SSO route may not be usable. The stack therefore binds its setup port only to the host loopback interface. Forward it over SSH, open `http://127.0.0.1:8080`, and complete the first-run account setup. Do not change the port to `0.0.0.0` or publish it publicly. Once the identity provider and SSO route are ready, remove the loopback mapping in a reviewed commit and use the Pangolin route.
+Before the identity provider is deployed, the Pangolin SSO route may not be usable. The stack binds its setup port only to host loopback. The installer selects a free host port in `18080`–`18100` and stores it as `INFISICAL_BOOTSTRAP_PORT` in `/etc/vps-bootstrap/infisical.env`; the container still listens on `8080`. Forward the selected host port over SSH, open `http://127.0.0.1:8080`, and complete the first-run account setup. The installer prints the selected port; it is also available with `grep INFISICAL_BOOTSTRAP_PORT /etc/vps-bootstrap/infisical.env`. Do not change the host bind to `0.0.0.0` or publish it publicly. Once the identity provider and SSO route are ready, remove the loopback mapping in a reviewed commit and use the Pangolin route.
 
 ## Configure ComposeFlux access
 

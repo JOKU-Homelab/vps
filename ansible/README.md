@@ -17,10 +17,10 @@ The installer writes the protected recovery bundle and bootstrap values under `/
 Complete Pangolin's first-admin setup at `https://pangolin.YOUR_BASE_DOMAIN` and create a site for this host. Infisical's first account and machine identity require a one-time setup in its UI. Its setup port is bound to loopback; use an SSH tunnel from your workstation:
 
 ```bash
-ssh -L 8080:127.0.0.1:8080 ADMIN_USER@YOUR_VPS_IP
+ssh -L 8080:127.0.0.1:18080 ADMIN_USER@YOUR_VPS_IP
 ```
 
-Open `http://127.0.0.1:8080`, create a dedicated project and production environment, add the secrets documented by each stack (including the Pangolin site endpoint, ID, and secret), then create a Viewer machine identity. Put its client ID and secret, the project ID, and other ComposeFlux settings in `/etc/vps-bootstrap/composeflux.env` (mode `0600`). Run:
+The installer chooses a free host-side port in the `18080`–`18100` range and prints it at completion. If it chose a different port, use that number in the SSH command; it is saved as `INFISICAL_BOOTSTRAP_PORT` in `/etc/vps-bootstrap/infisical.env`. Open `http://127.0.0.1:8080`, create a dedicated project and production environment, add the secrets documented by each stack (including the Pangolin site endpoint, ID, and secret), then create a Viewer machine identity. Put its client ID and secret, the project ID, and other ComposeFlux settings in `/etc/vps-bootstrap/composeflux.env` (mode `0600`). Run:
 
 ```bash
 ansible-playbook -i 'localhost,' -c local playbooks/enable-gitops.yml

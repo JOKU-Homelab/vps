@@ -23,7 +23,7 @@ services:
     # reachable only from the VPS; use an SSH tunnel and remove it after SSO is
     # available through Pangolin.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${INFISICAL_BOOTSTRAP_PORT:-18080}:8080"
     labels:
       - pangolin.public-resources.infisical.name=Infisical
       - pangolin.public-resources.infisical.mode=http
