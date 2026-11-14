@@ -2,8 +2,6 @@
 set -Eeuo pipefail
 umask 077
 
-readonly CONFIG_FILE="${VPS_BACKUP_CONFIG:-/etc/vps/backup.env}"
-readonly PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-/etc/vps/restic-password}"
 readonly STAGING_DIR="${VPS_BACKUP_STAGING:-/opt/vps/backup/staging}"
 COMPOSE_FILE="${VPS_BACKUP_COMPOSE_FILE:-}"
 readonly DOCKER_BIN="${DOCKER_BIN:-docker}"
@@ -19,24 +17,18 @@ Usage:
   vps-backup restore SNAPSHOT EMPTY_TARGET_DIRECTORY
   vps-backup restore-host SNAPSHOT
 
-Configuration is read from /etc/vps/backup.env (root-owned mode 0600).
-The Restic password is read from /etc/vps/restic-password (root-owned mode 0600).
+Restic credentials are injected from Infisical for the duration of the command.
 EOF
 }
 
 fail() { printf 'vps-backup: %s\n' "$*" >&2; exit 1; }
 
 load_config() {
-  [[ -f "$CONFIG_FILE" ]] || fail "missing $CONFIG_FILE"
-  [[ -f "$PASSWORD_FILE" ]] || fail "missing $PASSWORD_FILE"
-  [[ "$(stat -c '%u:%a' "$CONFIG_FILE")" == '0:600' ]] || fail "$CONFIG_FILE must be root-owned mode 0600"
-  [[ "$(stat -c '%u:%a' "$PASSWORD_FILE")" == '0:600' ]] || fail "$PASSWORD_FILE must be root-owned mode 0600"
-  # shellcheck disable=SC1090
-  source "$CONFIG_FILE"
-  : "${RESTIC_REPOSITORY:?Set RESTIC_REPOSITORY in $CONFIG_FILE}"
-  : "${B2_ACCOUNT_ID:?Set B2_ACCOUNT_ID in $CONFIG_FILE}"
-  : "${B2_ACCOUNT_KEY:?Set B2_ACCOUNT_KEY in $CONFIG_FILE}"
-  export RESTIC_REPOSITORY B2_ACCOUNT_ID B2_ACCOUNT_KEY
+  : "${RESTIC_REPOSITORY:?Set RESTIC_REPOSITORY in Infisical}"
+  : "${B2_ACCOUNT_ID:?Set B2_ACCOUNT_ID in Infisical}"
+  : "${B2_ACCOUNT_KEY:?Set B2_ACCOUNT_KEY in Infisical}"
+  : "${RESTIC_PASSWORD:?Set RESTIC_PASSWORD in Infisical}"
+  export RESTIC_REPOSITORY B2_ACCOUNT_ID B2_ACCOUNT_KEY RESTIC_PASSWORD
 }
 
 resolve_restic_image() {
@@ -60,10 +52,10 @@ restic() {
     --env RESTIC_REPOSITORY \
     --env B2_ACCOUNT_ID \
     --env B2_ACCOUNT_KEY \
-    --env RESTIC_PASSWORD_FILE=/run/secrets/restic-password \
-    --mount "type=bind,src=$PASSWORD_FILE,dst=/run/secrets/restic-password,readonly" \
+    --env RESTIC_PASSWORD \
     --mount "type=bind,src=$STAGING_DIR,dst=/staging" \
-    --mount type=bind,src=/,dst=/host,readonly \
+    --mount type=bind,src=/opt,dst=/host/opt,readonly \
+    --mount type=bind,src=/etc/vps,dst=/host/etc/vps,readonly \
     "$RESTIC_IMAGE" "$@"
 }
 
@@ -92,7 +84,7 @@ prepare_postgres_dumps() {
 }
 
 restore_host() {
-  local snapshot="${1:-}" confirmation="${2:-}" restore_id restore_root source_root answer bootstrap_port
+  local snapshot="${1:-}" confirmation="${2:-}" restore_id restore_root source_root answer
   [[ -n "$snapshot" ]] || { usage >&2; exit 2; }
   if [[ "$confirmation" != '--yes' ]]; then
     [[ -r /dev/tty ]] || fail 'restore-host requires an interactive terminal unless --yes is supplied'
@@ -105,17 +97,13 @@ restore_host() {
   printf 'Restoring snapshot %s to a protected staging directory.\n' "$snapshot"
   restic restore "$snapshot" --target "/staging/restore-$restore_id"
   source_root="$restore_root/host"
-  bootstrap_port="$(awk -F= '$1 == "INFISICAL_BOOTSTRAP_PORT" {print $2; exit}' /etc/vps-bootstrap/infisical.env 2>/dev/null || true)"
-  [[ -z "$bootstrap_port" || "$bootstrap_port" =~ ^[0-9]{1,5}$ ]] || fail 'invalid local Infisical bootstrap port'
   [[ -d "$source_root/opt" ]] || fail 'snapshot does not contain the expected /opt tree'
-  [[ -f "$source_root/etc/vps-bootstrap/infisical.env" ]] || fail 'snapshot does not contain Infisical bootstrap credentials'
   rm -rf -- "$source_root/opt/vps/repo" "$source_root/opt/vps/composeflux/repo"
 
   cat >&2 <<'NOTICE'
 This will stop Docker and replace service data under /opt.
-It restores the old Infisical and Pangolin bootstrap credentials, while keeping
-the new host's SSH/user config. Run this only on a replacement VPS before
-starting its Compose services.
+It preserves the new host's Infisical access configuration and restores only
+service data. Run this on a replacement VPS before starting its Compose services.
 NOTICE
   if [[ "$confirmation" == '--yes' ]]; then
     printf 'Proceeding with unattended restore as requested.\n'
@@ -130,24 +118,6 @@ NOTICE
 
   mkdir -p /opt /etc/vps-bootstrap
   cp -a "$source_root/opt/." /opt/
-  for bootstrap_file in infisical.env pangolin.env pangolin-seed.env composeflux.env; do
-    if [[ -f "$source_root/etc/vps-bootstrap/$bootstrap_file" ]]; then
-      install -o root -g root -m 0600 \
-        "$source_root/etc/vps-bootstrap/$bootstrap_file" \
-        "/etc/vps-bootstrap/$bootstrap_file"
-    fi
-  done
-  if [[ -n "$bootstrap_port" ]]; then
-    local infisical_env=/etc/vps-bootstrap/infisical.env
-    if grep -q '^INFISICAL_BOOTSTRAP_PORT=' "$infisical_env"; then
-      sed -i "s/^INFISICAL_BOOTSTRAP_PORT=.*/INFISICAL_BOOTSTRAP_PORT=$bootstrap_port/" "$infisical_env"
-    else
-      printf 'INFISICAL_BOOTSTRAP_PORT=%s\n' "$bootstrap_port" >>"$infisical_env"
-    fi
-    chmod 0600 "$infisical_env"
-    chown root:root "$infisical_env"
-  fi
-
   systemctl start docker
   printf 'Host data restored. Start services from the repository after checking the restored bootstrap files.\n'
   printf 'PostgreSQL logical exports are available under %s/staging/postgresql.\n' "$restore_root"
@@ -169,8 +139,7 @@ restore_snapshot() {
     --env RESTIC_REPOSITORY \
     --env B2_ACCOUNT_ID \
     --env B2_ACCOUNT_KEY \
-    --env RESTIC_PASSWORD_FILE=/run/secrets/restic-password \
-    --mount "type=bind,src=$PASSWORD_FILE,dst=/run/secrets/restic-password,readonly" \
+    --env RESTIC_PASSWORD \
     --mount "type=bind,src=$canonical_target,dst=/restore" \
     "$RESTIC_IMAGE" restore "$snapshot" --target /restore
 }
@@ -200,15 +169,14 @@ case "$command" in
       --host "$(hostname -f 2>/dev/null || hostname)" \
       --tag vps \
       --tag "os:$(. /etc/os-release && printf '%s' "${ID:-linux}")" \
+      --exclude /host/etc/vps/install.conf \
       --exclude /host/etc/vps/backup.env \
       --exclude /host/etc/vps/restic-password \
-      --exclude /host/etc/vps/install.conf \
       --exclude /host/opt/vps/repo \
       --exclude /host/opt/vps/composeflux/repo \
       --exclude /host/opt/vps/backup/staging \
       /host/opt \
       /host/etc/vps \
-      /host/etc/vps-bootstrap \
       /staging/postgresql
     restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune
     ;;

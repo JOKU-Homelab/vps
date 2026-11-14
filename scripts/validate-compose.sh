@@ -10,9 +10,7 @@ while IFS= read -r compose_file; do
   trap 'rm -rf "$temp_dir"' EXIT
   if [[ "$compose_file" == */stacks/composeflux/compose.yaml ]]; then
     cat >"$temp_dir/composeflux.env" <<'ENV'
-GIT_REPO_URL=https://validation.example.invalid/repo.git
-GIT_BRANCH=main
-INFISICAL_SITE_URL=http://infisical-api:8080
+INFISICAL_DOMAIN=https://app.infisical.com
 INFISICAL_ENVIRONMENT=prod
 INFISICAL_PROJECT_ID=validation
 INFISICAL_CLIENT_ID=validation

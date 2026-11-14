@@ -6,7 +6,7 @@ services:
     container_name: pangolin
     restart: unless-stopped
     environment:
-      SERVER_SECRET: ${SERVER_SECRET:?Set SERVER_SECRET in the root-only Pangolin bootstrap env}
+      SERVER_SECRET: ${SERVER_SECRET:?Set SERVER_SECRET in Infisical}
       EMAIL_SMTP_USER: ${SMTP_USERNAME:-}
       EMAIL_SMTP_PASS: ${SMTP_PASSWORD:-}
     volumes:

@@ -7,7 +7,7 @@
     composeflux_credentials: /etc/vps-bootstrap/composeflux.env
     composeflux_compose: "{{ playbook_dir }}/../../stacks/composeflux/compose.yaml"
   tasks:
-    - name: Check for the root-only ComposeFlux Infisical credentials
+    - name: Check for the root-only ComposeFlux Infisical identity
       ansible.builtin.stat:
         path: "{{ composeflux_credentials }}"
       register: composeflux_env
@@ -19,26 +19,9 @@
           - composeflux_env.stat.uid == 0
           - composeflux_env.stat.mode == '0600'
         fail_msg: >-
-          Create {{ composeflux_credentials }} with the Infisical machine identity
-          values and mode 0600 before enabling ComposeFlux.
+          Complete Pangolin setup and add the read-only ComposeFlux identity to Infisical before enabling ComposeFlux.
 
-    - name: Read ComposeFlux bootstrap settings without exposing credentials
-      ansible.builtin.slurp:
-        src: "{{ composeflux_credentials }}"
-      register: composeflux_env_raw
-      no_log: true
-
-    - name: Require a configured Infisical machine identity
-      ansible.builtin.assert:
-        that:
-          - "'SET_AFTER_INFISICAL_SETUP' not in (composeflux_env_raw.content | b64decode)"
-          - "'INFISICAL_CLIENT_ID=' in (composeflux_env_raw.content | b64decode)"
-          - "'INFISICAL_CLIENT_SECRET=' in (composeflux_env_raw.content | b64decode)"
-          - "'INFISICAL_PROJECT_ID=' in (composeflux_env_raw.content | b64decode)"
-        fail_msg: Update the project and identity values in /etc/vps-bootstrap/composeflux.env.
-      no_log: true
-
-    - name: Confirm the Pangolin network and Infisical API are reachable
+    - name: Confirm the Pangolin network exists
       ansible.builtin.command: docker network inspect pangolin_frontend
       changed_when: false
 
@@ -53,5 +36,13 @@
           - "{{ composeflux_compose }}"
           - up
           - -d
+      environment:
+        INFISICAL_DOMAIN: "{{ lookup('env', 'INFISICAL_DOMAIN') }}"
+        INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+        INFISICAL_ENVIRONMENT: "{{ lookup('env', 'INFISICAL_ENVIRONMENT') }}"
+        INFISICAL_SECRET_PATH: "{{ lookup('env', 'INFISICAL_SECRET_PATH') }}"
+        COMPOSEFLUX_GIT_REPO_URL: "{{ lookup('env', 'COMPOSEFLUX_GIT_REPO_URL') }}"
+        COMPOSEFLUX_GIT_BRANCH: "{{ lookup('env', 'COMPOSEFLUX_GIT_BRANCH') | default('main', true) }}"
       register: composeflux_start
       changed_when: "'Started' in composeflux_start.stdout or 'Created' in composeflux_start.stdout"
+      no_log: true

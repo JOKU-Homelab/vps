@@ -1,44 +1,32 @@
-# ComposeFlux
+# ComposeFlux and Infisical
 
-ComposeFlux runs the repository's Compose stacks from Git. Its canonical Compose manifest is [`stacks/composeflux/compose.yaml`](../stacks/composeflux/compose.yaml), so Renovate can update its image and ComposeFlux can reconcile its own service after a reviewed change merges.
+ComposeFlux deploys repository-managed Compose projects after Pangolin's first-run setup. It reads the configured Infisical project and injects secrets into each stack during deployment.
 
-ComposeFlux v0.19.0 supports Infisical directly. It polls the configured Git branch, reads the configured Infisical project and secret paths, and passes only referenced values to each stack's Compose configuration. The repository is intended to be public, so use an HTTPS Git URL and do not create a Git deploy key unless the repository is later made private.
+The installer starts ComposeFlux only after the operator creates a Pangolin site and stores its endpoint, site ID, and site secret in Infisical. This avoids starting the managed stacks before their required configuration exists.
 
-## Bootstrap order
+## Infisical settings
 
-1. Ansible installs Docker and prepares the required directories and Docker network.
-2. Ansible starts the `stacks/infisical` project from this repository using `/etc/vps-bootstrap/infisical.env` as the local bootstrap environment.
-3. Complete Pangolin's first-admin setup and create a site. Complete Infisical's first-run setup, create a project for this VPS, add the `prod` environment, and add the secrets referenced by the stack Compose files, including `PANGOLIN_ENDPOINT`, `SITE_ID`, and `SITE_SECRET`.
-4. Create a machine identity with **Viewer** access to that project and production environment. Copy its Universal Auth client ID and secret into `/etc/vps-bootstrap/composeflux.env`.
-5. Ansible starts ComposeFlux from `stacks/composeflux/compose.yaml`. ComposeFlux then deploys the remaining stack directories and takes over ongoing reconciliation.
+ComposeFlux uses a dedicated read-only Universal Auth identity stored in `/etc/vps-bootstrap/composeflux.env` (root:root, mode `0600`). The installer uses a separate bootstrap identity for setup and backups, which should also be read-only after initial project seeding. Cloud is the default endpoint; a self-hosted instance can be selected with its HTTPS URL.
 
-The Infisical project ID, environment name, secret path, self-hosted API URL, and repository URL are configuration, not credentials. Set them in `/etc/vps-bootstrap/composeflux.env`, alongside the machine identity credentials. The example file in this directory contains placeholders only.
+ComposeFlux receives its Infisical endpoint, project ID, environment, path, and Git repository settings from the bootstrap environment and Infisical values. Keep the project limited to the secrets required by this repository because ComposeFlux can deploy any trusted Compose file in its managed Git checkout and has Docker socket access.
 
-Both host files must be owned by root and mode `0600`. Keep off-host recovery copies of the Infisical encryption key, authentication secret, database credentials, and ComposeFlux machine identity credential. Infisical cannot provide the initial values needed to start itself or authenticate ComposeFlux before it is running.
+## Required stack values
 
-## Secret scope
+The installer seeds generated credentials and placeholder values. Complete the `CHANGE_ME` values in Infisical before continuing. Compose files declare required keys with Compose interpolation errors, so missing configuration fails visibly rather than silently deploying with empty credentials.
 
-A ComposeFlux instance uses one Infisical machine identity, project, environment, and configured secret path set for all discovered stacks. That makes the repository a shared trust boundary: any Compose file in the repo can reference a key the identity can read. Keep deployment secrets in a dedicated project and grant this identity Viewer access only. Use separate ComposeFlux instances if stacks later need isolated identities.
+Pangolin's first administrator and site are created through its UI. There is no environment-variable first-admin bootstrap. Then add `PANGOLIN_ENDPOINT`, `SITE_ID`, and `SITE_SECRET` to Infisical and continue the installer.
 
-ComposeFlux has Docker socket access, which grants root-equivalent control of the VPS. Only merge trusted repository changes. Secrets referenced as Compose environment values may also be visible through Docker container inspection; use an application's supported `*_FILE` option or Compose secrets where possible.
+For CLI use, Universal Auth follows Infisical's documented machine identity flow:
 
-## Configuration
-
-Create `/etc/vps-bootstrap/composeflux.env` from [`.env.example`](.env.example). Set at least:
-
-```dotenv
-GIT_REPO_URL=https://github.com/OWNER/REPOSITORY.git
-GIT_BRANCH=main
-INFISICAL_CLIENT_ID=...
-INFISICAL_CLIENT_SECRET=...
-INFISICAL_ENVIRONMENT=prod
-INFISICAL_PROJECT_ID=...
-INFISICAL_SECRET_PATH=/
-INFISICAL_SITE_URL=http://infisical-api:8080
+```bash
+export INFISICAL_DOMAIN=https://app.infisical.com
+export INFISICAL_TOKEN="$(infisical login --method=universal-auth \
+  --client-id="$INFISICAL_CLIENT_ID" \
+  --client-secret="$INFISICAL_CLIENT_SECRET" --silent --plain)"
+infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" \
+  --env=prod --path=/ -- docker compose up -d
 ```
 
-`INFISICAL_SITE_URL` uses the private `pangolin_frontend` Docker network and resolves to the `infisical-api` alias in the Infisical stack. Infisical's canonical `SITE_URL` remains its public HTTPS URL, which is used for browser-facing links and callbacks.
+Omit the default domain override only when using Infisical Cloud's default endpoint. For regional Cloud or self-hosted endpoints, use the URL shown by that Infisical instance.
 
-ComposeFlux scans one directory deep under `stacks/`. Do not remove a stack directory unless you intend to stop that project; ComposeFlux removes discovered stacks deleted from Git. `PRUNE_INTERVAL=0` disables periodic Docker resource pruning, but does not disable deleted-stack reconciliation.
-
-See the [ComposeFlux Infisical guide](https://veerendra2.github.io/composeflux/how-to-guides/Infisical/) and [overview](https://veerendra2.github.io/composeflux/Introduction/) for provider and reconciliation details.
+See the [ComposeFlux documentation](https://veerendra2.github.io/composeflux/) and the [Infisical Universal Auth guide](https://infisical.com/blog/introducing-machine-identities).

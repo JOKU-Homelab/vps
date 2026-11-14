@@ -3,18 +3,37 @@
   hosts: localhost
   connection: local
   become: true
-  vars_files:
-    - /etc/vps-bootstrap/site.yml
   vars:
     ansible_admin_group: wheel
+    vps_base_domain: "{{ lookup('env', 'VPS_BASE_DOMAIN') }}"
+    vps_admin_email: "{{ lookup('env', 'VPS_ADMIN_EMAIL') }}"
+    vps_smtp_enabled: "{{ lookup('env', 'SMTP_ENABLED') | default('no', true) == 'yes' }}"
+    vps_smtp_host: "{{ lookup('env', 'SMTP_HOST') }}"
+    vps_smtp_port: "{{ lookup('env', 'SMTP_PORT') | default('465', true) }}"
+    vps_smtp_secure: "{{ lookup('env', 'SMTP_SECURE') | default('true', true) }}"
+    vps_smtp_from_address: "{{ lookup('env', 'SMTP_FROM_ADDRESS') }}"
+    vps_admin_user: "{{ lookup('env', 'VPS_ADMIN_USER') | default('admin', true) }}"
+    vps_admin_ssh_public_key: "{{ lookup('env', 'VPS_ADMIN_SSH_PUBLIC_KEY') }}"
+    vps_users:
+      - name: "{{ vps_admin_user }}"
+        comment: VPS administrator
+        shell: /bin/bash
+        groups: [wheel, docker]
+        public_key: "{{ vps_admin_ssh_public_key }}"
+        passwordless_sudo: true
+      - name: ansible
+        comment: Ansible service account
+        shell: /bin/bash
+        groups: [wheel]
+        public_key: "{{ vps_admin_ssh_public_key }}"
+        key_options: no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding
+        passwordless_sudo: true
   pre_tasks:
     - name: Check protected bootstrap environment files
       ansible.builtin.stat:
         path: "{{ item }}"
       loop:
         - /etc/vps-bootstrap/infisical.env
-        - /etc/vps-bootstrap/pangolin.env
-        - /etc/vps-bootstrap/composeflux.env
       register: bootstrap_files
 
     - name: Require root-only bootstrap environment files
@@ -32,10 +51,10 @@
     - name: Require host-specific bootstrap settings
       ansible.builtin.assert:
         that:
-          - vps_base_domain is defined
-          - vps_admin_email is defined
+          - vps_base_domain | length > 3
+          - vps_admin_email | length > 5
           - vps_users | length >= 1
-        fail_msg: Run install.sh to create root-only bootstrap configuration first.
+        fail_msg: Run install.sh with access to the required Infisical project values.
       no_log: true
 
   roles:
@@ -59,31 +78,6 @@
           - --yes
       when: vps_restore_snapshot is defined
 
-    - name: Read restored Pangolin bootstrap configuration
-      ansible.builtin.slurp:
-        src: /etc/vps-bootstrap/pangolin.env
-      register: restored_pangolin_bootstrap
-      when: vps_restore_snapshot is defined
-      no_log: true
-
-    - name: Read restored Infisical bootstrap configuration
-      ansible.builtin.slurp:
-        src: /etc/vps-bootstrap/infisical.env
-      register: restored_infisical_bootstrap
-      when: vps_restore_snapshot is defined
-      no_log: true
-
-    - name: Require the original Pangolin domain for a full restore
-      ansible.builtin.assert:
-        that:
-          - "('BASE_DOMAIN=' ~ vps_base_domain) in (restored_pangolin_bootstrap.content | b64decode).splitlines()"
-          - "('SITE_URL=https://infisical.' ~ vps_base_domain) in (restored_infisical_bootstrap.content | b64decode).splitlines()"
-        fail_msg: >-
-          The selected snapshot belongs to a different base domain. Re-run the
-          installer with the original domain before starting restored services.
-      when: vps_restore_snapshot is defined
-      no_log: true
-
     - name: Create persistent service data directories with container ownership
       ansible.builtin.file:
         path: "{{ item.path }}"
@@ -93,8 +87,6 @@
         mode: "{{ item.mode }}"
       loop:
         - { path: /opt/vps/data, owner: root, group: root, mode: '0750' }
-        - { path: /opt/vps/data/infisical/postgresql, owner: '70', group: '70', mode: '0700' }
-        - { path: /opt/vps/data/infisical/redis, owner: '999', group: '1000', mode: '0750' }
         - { path: /opt/vps/data/authentik/postgresql, owner: '70', group: '70', mode: '0700' }
         - { path: /opt/vps/data/authentik/data, owner: '1000', group: '1000', mode: '0750' }
         - { path: /opt/vps/data/authentik/templates, owner: '1000', group: '1000', mode: '0750' }
@@ -111,16 +103,6 @@
         - { path: /opt/pangolin/config/traefik, owner: root, group: root, mode: '0750' }
         - { path: /opt/pangolin/config/letsencrypt, owner: root, group: root, mode: '0750' }
         - { path: /opt/pangolin/data/runtime, owner: root, group: root, mode: '0750' }
-
-    - name: Check whether the isolated database backup network exists
-      ansible.builtin.command: docker network inspect vps_database_backups
-      register: backup_network
-      changed_when: false
-      failed_when: false
-
-    - name: Create the isolated database backup network
-      ansible.builtin.command: docker network create --driver bridge --internal vps_database_backups
-      when: backup_network.rc != 0
 
     - name: Render Pangolin's non-secret server configuration from the repository template
       ansible.builtin.template:
@@ -144,40 +126,26 @@
         argv:
           - docker
           - compose
-          - --env-file
-          - /etc/vps-bootstrap/pangolin.env
           - -f
           - "{{ playbook_dir }}/../../stacks/pangolin/compose.yaml"
           - up
           - -d
       environment:
         BASE_DOMAIN: "{{ vps_base_domain }}"
+        SERVER_SECRET: "{{ lookup('env', 'SERVER_SECRET') }}"
+        SMTP_USERNAME: "{{ lookup('env', 'SMTP_USERNAME') | default('', true) }}"
+        SMTP_PASSWORD: "{{ lookup('env', 'SMTP_PASSWORD') | default('', true) }}"
       register: pangolin_start
       changed_when: "'Started' in pangolin_start.stdout or 'Created' in pangolin_start.stdout"
+      no_log: true
 
     - name: Wait for Pangolin's shared Docker network
       ansible.builtin.command: docker network inspect pangolin_frontend
       changed_when: false
 
-    - name: Start the repository-managed Infisical stack
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - --env-file
-          - /etc/vps-bootstrap/infisical.env
-          - -f
-          - "{{ playbook_dir }}/../../stacks/infisical/compose.yaml"
-          - up
-          - -d
-      environment:
-        INFISICAL_PUBLIC_DOMAIN: "infisical.{{ vps_base_domain }}"
-      register: infisical_start
-      changed_when: "'Started' in infisical_start.stdout or 'Created' in infisical_start.stdout"
-
     - name: Report core service bootstrap status
       ansible.builtin.debug:
         msg:
           - "Pangolin Compose started from the repository."
-          - "Infisical Compose started from the repository."
-          - "Complete Infisical's first-run setup, then configure the ComposeFlux machine identity and run enable-gitops.yml."
+          - "Core configuration and service secrets were fetched from Infisical."
+          - "Complete Pangolin site setup before enabling ComposeFlux."

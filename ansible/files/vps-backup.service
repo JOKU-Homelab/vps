@@ -2,23 +2,25 @@
 Description=Create an encrypted off-host VPS backup
 After=docker.service
 Requires=docker.service
-ConditionPathExists=/etc/vps/backup.env
-ConditionPathExists=/etc/vps/restic-password
+ConditionPathExists=/etc/vps-bootstrap/infisical.env
 
 [Service]
 Type=oneshot
 User=root
 Group=root
 UMask=0077
-ExecStart=/usr/local/sbin/vps-backup backup
+ExecStart=/usr/local/sbin/vps-infisical-run /usr/local/sbin/vps-backup backup
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 PrivateTmp=true
 ProtectHome=read-only
 ProtectSystem=strict
-ReadWritePaths=/opt/vps/backup
+RuntimeDirectory=vps-infisical
+RuntimeDirectoryMode=0700
+ReadWritePaths=/opt/vps/backup /run/vps-infisical
 ReadOnlyPaths=/etc/vps /etc/vps-bootstrap /opt
+Environment=XDG_CONFIG_HOME=/run/vps-infisical
 NoNewPrivileges=true
 PrivateDevices=true
 ProtectKernelTunables=true

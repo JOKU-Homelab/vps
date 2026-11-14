@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly CONFIG_FILE=/etc/vps-bootstrap/infisical.env
+[[ -f "$CONFIG_FILE" ]] || { echo "vps-infisical-run: missing $CONFIG_FILE" >&2; exit 1; }
+[[ "$(stat -c '%u:%a' "$CONFIG_FILE")" == '0:600' ]] || { echo "vps-infisical-run: $CONFIG_FILE must be root-owned mode 0600" >&2; exit 1; }
+# shellcheck disable=SC1090
+source "$CONFIG_FILE"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/run/vps-infisical}"
+mkdir -p "$XDG_CONFIG_HOME"
+chmod 0700 "$XDG_CONFIG_HOME"
+: "${INFISICAL_DOMAIN:?Missing INFISICAL_DOMAIN}"
+: "${INFISICAL_PROJECT_ID:?Missing INFISICAL_PROJECT_ID}"
+: "${INFISICAL_ENVIRONMENT:?Missing INFISICAL_ENVIRONMENT}"
+: "${INFISICAL_SECRET_PATH:?Missing INFISICAL_SECRET_PATH}"
+: "${INFISICAL_CLIENT_ID:?Missing INFISICAL_CLIENT_ID}"
+: "${INFISICAL_CLIENT_SECRET:?Missing INFISICAL_CLIENT_SECRET}"
+export INFISICAL_DOMAIN
+token="$(infisical login --method=universal-auth --client-id="$INFISICAL_CLIENT_ID" --client-secret="$INFISICAL_CLIENT_SECRET" --silent --plain)"
+[[ -n "$token" ]] || { echo 'vps-infisical-run: authentication returned no token' >&2; exit 1; }
+export INFISICAL_TOKEN="$token"
+exec infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" \
+  --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH" -- "$@"

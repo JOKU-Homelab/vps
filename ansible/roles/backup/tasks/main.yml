@@ -15,6 +15,14 @@
     group: root
     mode: '0750'
 
+- name: Install Infisical runtime wrapper for backup credentials
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../files/vps-infisical-run"
+    dest: /usr/local/sbin/vps-infisical-run
+    owner: root
+    group: root
+    mode: '0750'
+
 - name: Install backup systemd service
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../files/vps-backup.service"
@@ -33,24 +41,10 @@
     mode: '0644'
   notify: Reload systemd
 
-- name: Check whether backup credentials have been provisioned
+- name: Check whether Infisical bootstrap credentials have been provisioned
   ansible.builtin.stat:
-    path: "{{ item }}"
-  loop:
-    - /etc/vps/backup.env
-    - /etc/vps/restic-password
-  register: backup_credential_files
-
-- name: Validate provisioned backup credential permissions
-  ansible.builtin.assert:
-    that:
-      - item.stat.pw_name == 'root'
-      - item.stat.mode == '0600'
-    fail_msg: "{{ item.item }} must be a root-owned file with mode 0600."
-  loop: "{{ backup_credential_files.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-  when: item.stat.exists
+    path: /etc/vps-bootstrap/infisical.env
+  register: infisical_bootstrap
 
 - name: Enable daily backups after credentials are installed
   ansible.builtin.systemd:
@@ -58,7 +52,7 @@
     enabled: true
     state: started
     daemon_reload: true
-  when: backup_credential_files.results | selectattr('stat.exists') | list | length == 2
+  when: infisical_bootstrap.stat.exists and infisical_bootstrap.stat.uid == 0 and infisical_bootstrap.stat.mode == '0600'
 
 - name: Keep daily backups disabled until credentials are installed
   ansible.builtin.systemd:
@@ -66,4 +60,4 @@
     enabled: false
     state: stopped
     daemon_reload: true
-  when: backup_credential_files.results | selectattr('stat.exists') | list | length != 2
+  when: not infisical_bootstrap.stat.exists or infisical_bootstrap.stat.uid != 0 or infisical_bootstrap.stat.mode != '0600'
