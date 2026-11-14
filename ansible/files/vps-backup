@@ -130,7 +130,7 @@ NOTICE
 
   mkdir -p /opt /etc/vps-bootstrap
   cp -a "$source_root/opt/." /opt/
-  for bootstrap_file in infisical.env pangolin.env composeflux.env; do
+  for bootstrap_file in infisical.env pangolin.env pangolin-seed.env composeflux.env; do
     if [[ -f "$source_root/etc/vps-bootstrap/$bootstrap_file" ]]; then
       install -o root -g root -m 0600 \
         "$source_root/etc/vps-bootstrap/$bootstrap_file" \

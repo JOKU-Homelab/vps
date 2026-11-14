@@ -6,11 +6,11 @@ The persistent database, generated tunnel key, certificates, and runtime files a
 
 ## Initial setup
 
-The installer asks for a base domain and certificate email, and creates `/etc/vps-bootstrap/pangolin.env` with a random `SERVER_SECRET`. That file is root-owned and mode `0600`; keep the secret in Infisical and in the off-host recovery material. Ansible renders the non-secret config template, then starts this stack before Infisical so `pangolin_frontend` exists.
+The installer asks for a base domain and certificate email, and creates `/etc/vps-bootstrap/pangolin.env` with a random `SERVER_SECRET`. It can also configure SMTP for Pangolin and Infisical. Pangolin reads its SMTP host, port, sender, and TLS mode from the rendered config and its username/password from environment variables. The first Pangolin administrator still needs the setup token and browser wizard; no supported environment-variable bootstrap is documented. Ansible starts this stack before Infisical so `pangolin_frontend` exists.
 
 DNS should point the Pangolin dashboard and each intended public service hostname to the VPS. Open only required ports in both the provider firewall and firewalld: TCP 80/443 and the configured Gerbil UDP ports. Add an AAAA record only when IPv6 is enabled and reachable.
 
-Pangolin prints a setup token at first startup. Complete first-admin setup through its HTTPS dashboard after DNS and certificate issuance are ready. Create a site in Pangolin, then store its ID and secret in Infisical as `SITE_ID` and `SITE_SECRET`; set `PANGOLIN_ENDPOINT` to `https://pangolin.<base-domain>`. ComposeFlux will start the repository-managed Pangolin CLI site connector after those values and its own Infisical identity are configured. The connector reads Compose labels through the Docker socket, so treat it as root-equivalent. Do not commit setup tokens, site credentials, license material, database files, or generated keys.
+Pangolin prints a setup token at first startup. Complete first-admin setup through its HTTPS dashboard after DNS and certificate issuance are ready. Create a site in Pangolin. Then initialize Infisical, import the generated `/etc/vps-bootstrap/pangolin-seed.env` with the Infisical CLI, and add the site's ID and secret. Once the Infisical project and machine identity are ready, ComposeFlux can take over repository-managed stack deployments using Infisical values. Keep the root-only local bootstrap copy for recovery and pre-Infisical startup. The connector reads Compose labels through the Docker socket, so treat it as root-equivalent. Do not commit setup tokens, site credentials, license material, database files, or generated keys.
 
 ## Updates and configuration
 

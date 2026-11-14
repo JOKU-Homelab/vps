@@ -60,7 +60,7 @@ except Exception as e:
     raise SystemExit(f"invalid install.conf: {e}")
 if c.get("schema_version", 1) != 1:
     raise SystemExit("unsupported install.conf schema_version")
-keys = ("repository_url", "ref", "admin_user", "admin_ssh_public_key", "base_domain", "admin_email", "restic_repository", "b2_account_id", "b2_account_key", "restic_password")
+keys = ("repository_url", "ref", "admin_user", "admin_ssh_public_key", "base_domain", "admin_email", "restic_repository", "b2_account_id", "b2_account_key", "restic_password", "smtp_enabled", "smtp_host", "smtp_port", "smtp_username", "smtp_password", "smtp_from_address", "smtp_secure")
 values = {key: c.get(key) for key in keys}
 bootstrap = c.get("bootstrap", {})
 if isinstance(bootstrap, dict):
@@ -146,6 +146,11 @@ collect_value() {
     admin_email) [[ "$value" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "Enter a valid email address." ;;
     restic_repository) [[ "$value" =~ ^[A-Za-z0-9:/._@+-]+$ ]] || die "Repository URL contains unsupported characters." ;;
     b2_account_id|b2_account_key) [[ "$value" =~ ^[A-Za-z0-9_-]+$ ]] || die "$label contains unsupported characters." ;;
+    smtp_enabled|smtp_secure) [[ "$value" == yes || "$value" == no ]] || die "Answer yes or no for SMTP." ;;
+    smtp_port) [[ "$value" =~ ^[0-9]{1,5}$ ]] && (( 10#$value >= 1 && 10#$value <= 65535 )) || die "SMTP port must be between 1 and 65535." ;;
+    smtp_host) [[ "$value" =~ ^[A-Za-z0-9.-]+$ ]] || die "Enter an SMTP hostname." ;;
+    smtp_username|smtp_password) [[ "$value" != *[$'\r\n']* ]] || die "$label must be a single line." ;;
+    smtp_from_address) [[ "$value" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "Enter a valid SMTP sender email address." ;;
   esac
   printf -v "$var_name" '%s' "$value"
   persist_config setting "$field" "$value"
@@ -162,6 +167,32 @@ collect_value b2_account_id b2_account_id "Backblaze B2 account ID"
 collect_value b2_account_key b2_account_key "Backblaze B2 application key" "" true
 collect_value restic_password restic_password "Restic repository password" "" true
 
+smtp_enabled="${smtp_enabled:-${VPS_SMTP_ENABLED:-}}"
+if [[ -z "$smtp_enabled" ]]; then
+  if [[ -r /dev/tty ]]; then
+    IFS= read -r -p "Enable SMTP for Pangolin and Infisical? (yes/no, default no): " smtp_enabled </dev/tty || die "Could not read SMTP setting."
+  fi
+  smtp_enabled="${smtp_enabled:-no}"
+  persist_config setting smtp_enabled "$smtp_enabled"
+fi
+[[ "$smtp_enabled" == yes || "$smtp_enabled" == no ]] || die "Answer yes or no for SMTP."
+if [[ "$smtp_enabled" == yes ]]; then
+  smtp_host="${smtp_host:-${VPS_SMTP_HOST:-}}"
+  smtp_port="${smtp_port:-${VPS_SMTP_PORT:-}}"
+  smtp_username="${smtp_username:-${VPS_SMTP_USERNAME:-}}"
+  smtp_password="${smtp_password:-${VPS_SMTP_PASSWORD:-}}"
+  smtp_from_address="${smtp_from_address:-${VPS_SMTP_FROM_ADDRESS:-}}"
+  smtp_secure="${smtp_secure:-${VPS_SMTP_SECURE:-}}"
+  collect_value smtp_host smtp_host "SMTP host"
+  collect_value smtp_port smtp_port "SMTP port" "587"
+  collect_value smtp_username smtp_username "SMTP username"
+  collect_value smtp_password smtp_password "SMTP password" "" true
+  collect_value smtp_from_address smtp_from_address "SMTP sender address"
+  collect_value smtp_secure smtp_secure "Use implicit TLS (typically port 465)? (yes/no)" "no"
+else
+  smtp_host=""; smtp_port=""; smtp_username=""; smtp_password=""; smtp_from_address=""; smtp_secure="no"
+fi
+
 if [[ -n "$restore_override" ]]; then
   restore_snapshot="$restore_override"
 elif [[ "$config_mode" == true ]]; then
@@ -173,13 +204,14 @@ fi
 
 export repository_url ref admin_user admin_ssh_public_key base_domain admin_email
 export restic_repository b2_account_id b2_account_key restic_password
+export smtp_enabled smtp_host smtp_port smtp_username smtp_password smtp_from_address smtp_secure
 install -d -o root -g root -m 0700 "$BOOTSTRAP_DIR" /etc/vps
 
 if [[ "$config_mode" == true && -f "$config_file" ]]; then
   python3 - "$config_file" <<'PY'
 import json, os, pathlib, sys
 c=json.loads(pathlib.Path(sys.argv[1]).read_text())
-for key in ("infisical_env","pangolin_env","composeflux_env"):
+for key in ("infisical_env","pangolin_env","pangolin_seed_env","composeflux_env"):
     content=c.get("bootstrap",{}).get(key)
     if isinstance(content,str) and content:
         name=key[:-4]+".env"
@@ -252,6 +284,42 @@ if not (boot/'pangolin.env').exists():
     write_env(boot/'pangolin.env', {'SERVER_SECRET':secret,'BASE_DOMAIN':domain,'PANGOLIN_DOMAIN':f'pangolin.{domain}','LETSENCRYPT_EMAIL':email,'INFISICAL_PUBLIC_DOMAIN':f'infisical.{domain}'})
 if not (boot/'composeflux.env').exists():
     write_env(boot/'composeflux.env', {'GIT_REPO_URL':os.environ['repository_url'],'GIT_BRANCH':os.environ['ref'],'INFISICAL_SITE_URL':'http://infisical-api:8080','INFISICAL_ENVIRONMENT':'prod','INFISICAL_PROJECT_ID':'SET_AFTER_INFISICAL_SETUP','INFISICAL_CLIENT_ID':'SET_AFTER_INFISICAL_SETUP','INFISICAL_CLIENT_SECRET':'SET_AFTER_INFISICAL_SETUP','INFISICAL_SECRET_PATH':'/'})
+
+smtp={
+    'SMTP_ENABLED':os.environ['smtp_enabled'],
+    'SMTP_HOST':os.environ['smtp_host'],
+    'SMTP_PORT':os.environ['smtp_port'],
+    'SMTP_USERNAME':os.environ['smtp_username'],
+    'SMTP_PASSWORD':os.environ['smtp_password'],
+    'SMTP_FROM_ADDRESS':os.environ['smtp_from_address'],
+    'SMTP_SECURE':'true' if os.environ['smtp_secure']=='yes' else 'false',
+}
+def env_value(value):
+    if not value: return "''"
+    if all(c.isalnum() or c in '._:/@+-' for c in value): return value
+    return "'" + value.replace("'", "\\'") + "'"
+for name in ('infisical.env','pangolin.env'):
+    path=boot/name
+    lines=path.read_text().splitlines()
+    updates={key:env_value(value) for key,value in smtp.items()}
+    found=set(); out=[]
+    for line in lines:
+        key=line.split('=',1)[0] if '=' in line else ''
+        if key in updates:
+            out.append(f'{key}={updates[key]}'); found.add(key)
+        else: out.append(line)
+    for key,value in updates.items():
+        if key not in found: out.append(f'{key}={value}')
+    path.write_text('\n'.join(out)+'\n'); path.chmod(0o600); os.chown(path,0,0)
+server_secret=next(line.split('=',1)[1] for line in (boot/'pangolin.env').read_text().splitlines() if line.startswith('SERVER_SECRET='))
+seed={
+    'SERVER_SECRET':server_secret,
+    'PANGOLIN_ENDPOINT':f"https://pangolin.{os.environ['base_domain']}",
+    **{key:value for key,value in smtp.items() if key != 'SMTP_ENABLED' and value},
+}
+seed_path=boot/'pangolin-seed.env'
+seed_path.write_text(''.join(f'{key}={env_value(value)}\n' for key,value in seed.items()))
+seed_path.chmod(0o600); os.chown(seed_path,0,0)
 PY
 
 if [[ "$config_mode" == false ]]; then
@@ -272,13 +340,13 @@ p.write_text('\n'.join(result)+'\n'); p.chmod(0o600); os.chown(p,0,0)
 PY
 fi
 
-for name in infisical pangolin composeflux; do
+for name in infisical pangolin pangolin-seed composeflux; do
   persist_config bootstrap "${name}_env" "$(cat "$BOOTSTRAP_DIR/${name}.env")"
 done
 
 python3 - <<'PY'
 import json, os, pathlib
-site={'vps_base_domain':os.environ['base_domain'],'vps_admin_email':os.environ['admin_email'],'vps_users':[{'name':os.environ['admin_user'],'comment':'VPS administrator','shell':'/bin/bash','groups':['wheel','docker'],'public_key':os.environ['admin_ssh_public_key'],'passwordless_sudo':True},{'name':'ansible','comment':'Ansible service account','shell':'/bin/bash','groups':['wheel'],'public_key':os.environ['admin_ssh_public_key'],'key_options':'no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding','passwordless_sudo':True}]}
+site={'vps_base_domain':os.environ['base_domain'],'vps_admin_email':os.environ['admin_email'],'vps_smtp_enabled':os.environ['smtp_enabled']=='yes','vps_smtp_host':os.environ['smtp_host'],'vps_smtp_port':int(os.environ['smtp_port'] or '587'),'vps_smtp_secure':os.environ['smtp_secure']=='yes','vps_smtp_from_address':os.environ['smtp_from_address'],'vps_users':[{'name':os.environ['admin_user'],'comment':'VPS administrator','shell':'/bin/bash','groups':['wheel','docker'],'public_key':os.environ['admin_ssh_public_key'],'passwordless_sudo':True},{'name':'ansible','comment':'Ansible service account','shell':'/bin/bash','groups':['wheel'],'public_key':os.environ['admin_ssh_public_key'],'key_options':'no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding','passwordless_sudo':True}]}
 p=pathlib.Path('/etc/vps-bootstrap/site.yml'); p.write_text(json.dumps(site,indent=2)+'\n'); p.chmod(0o600); os.chown(p,0,0)
 backup=pathlib.Path('/etc/vps/backup.env')
 backup.write_text(f"RESTIC_REPOSITORY={os.environ['restic_repository']}\nB2_ACCOUNT_ID={os.environ['b2_account_id']}\nB2_ACCOUNT_KEY={os.environ['b2_account_key']}\n")

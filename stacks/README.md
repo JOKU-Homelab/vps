@@ -2,7 +2,7 @@
 
 ComposeFlux discovers each direct child directory with a Compose file under `stacks/`. Pangolin, Infisical, ComposeFlux, and application stacks are tracked here, so Renovate can propose image updates for all of them.
 
-Ansible installs host prerequisites and bootstraps Pangolin and Infisical. After the first-admin setup, create a Pangolin site and add its credentials to Infisical. Once Infisical's first-run setup and machine identity are complete, ComposeFlux deploys and reconciles the other stacks—including the Pangolin CLI site connector—from Git. Keep persistent app data under `/opt`, not in the repository checkout or Docker named volumes.
+Ansible installs host prerequisites and bootstraps Pangolin and Infisical. Their first admin accounts still require their web setup flows. After that, create a Pangolin site and add its credentials, `SERVER_SECRET`, and SMTP credentials to Infisical. Once Infisical's first-run setup and machine identity are complete, ComposeFlux deploys and reconciles the repository stacks—including Pangolin—using those Infisical secrets. Keep the protected local bootstrap copies for recovery and pre-Infisical startup. Keep persistent app data under `/opt`, not in the repository checkout or Docker named volumes.
 
 ## Secrets
 

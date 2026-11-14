@@ -23,6 +23,14 @@ server:
     credentials: false
   trust_proxy: 1
 
+{% if vps_smtp_enabled %}
+email:
+  smtp_host: "{{ vps_smtp_host }}"
+  smtp_port: {{ vps_smtp_port }}
+  smtp_secure: {{ vps_smtp_secure | lower }}
+  no_reply: "{{ vps_smtp_from_address }}"
+{% endif %}
+
 flags:
   require_email_verification: false
   disable_signup_without_invite: true

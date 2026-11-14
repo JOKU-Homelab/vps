@@ -5,8 +5,8 @@ Infrastructure as code for a single AlmaLinux VPS. The repository is the source 
 ## Deployment model
 
 1. Run [`install.sh`](install.sh) on a fresh VPS. It downloads a selected repository ref, prompts for the host's SSH key and public service domain, and runs Ansible locally.
-2. Ansible hardens the host, installs Docker, then starts Pangolin and self-hosted Infisical from their repository Compose files.
-3. Complete Pangolin's first-admin setup and create a site. Complete Infisical's initial setup, add the site credentials and application secrets to an Infisical project, then create a least-privilege machine identity and configure ComposeFlux's root-only client settings.
+2. The installer optionally collects SMTP settings for both Pangolin and Infisical. Ansible hardens the host, installs Docker, then starts Pangolin and self-hosted Infisical from their repository Compose files.
+3. Complete Pangolin's first-admin setup and create a site. Complete Infisical's initial setup, create its project, and add Pangolin's server secret, SMTP credentials, site credentials, and application secrets. Then create a least-privilege machine identity and configure ComposeFlux's root-only client settings.
 4. Run `ansible-playbook ansible/playbooks/enable-gitops.yml`. ComposeFlux then deploys the `stacks/` projects, including the Pangolin site connector, and reconciles future changes from Git.
 
 Example install command after the repository is public:
@@ -19,7 +19,7 @@ Use a release tag instead of `main` for repeatable installs. `install.sh --help`
 
 ## Secrets and recovery
 
-Application secrets live in a dedicated Infisical project. The small bootstrap set needed to start Infisical and authenticate ComposeFlux lives root-only under `/etc/vps-bootstrap/` and must have off-host recovery copies. Never commit real `.env` files, secret exports, backups, private keys, or host-specific configuration.
+Application secrets live in a dedicated Infisical project. Bootstrap secrets needed to start Pangolin and Infisical before Infisical is available are also held root-only under `/etc/vps-bootstrap/` and in the protected `install.conf` recovery bundle. Copy them into Infisical after its first-admin setup so ComposeFlux can use Infisical as the source for managed deployments. Never commit real `.env` files, secret exports, backups, private keys, or host-specific configuration.
 
 Restic snapshots use an off-host object-storage repository. The repository includes a host-aware `vps-backup` command and a full-host restore path. Persistent service data is stored in bind-mounted directories under `/opt`, not Docker named volumes.
 

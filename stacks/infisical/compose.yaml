@@ -17,6 +17,13 @@ services:
       SITE_URL: ${SITE_URL:?Set SITE_URL to the public Infisical URL}
       DB_CONNECTION_URI: ${DB_CONNECTION_URI:?Set DB_CONNECTION_URI in Infisical}
       REDIS_URL: ${REDIS_URL:?Set REDIS_URL in Infisical}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      SMTP_FROM_NAME: Infisical
+      SMTP_SECURE: ${SMTP_SECURE:-false}
     expose:
       - "8080"
     # Bootstrap access before the identity provider is running. This port is

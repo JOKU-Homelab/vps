@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     environment:
       SERVER_SECRET: ${SERVER_SECRET:?Set SERVER_SECRET in the root-only Pangolin bootstrap env}
+      EMAIL_SMTP_USER: ${SMTP_USERNAME:-}
+      EMAIL_SMTP_PASS: ${SMTP_PASSWORD:-}
     volumes:
       - /opt/pangolin/config:/app/config:z
       - type: bind
