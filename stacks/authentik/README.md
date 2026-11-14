@@ -6,7 +6,7 @@ Authentik is intentionally not protected by Pangolin Platform SSO; an identity p
 
 ## Infisical values
 
-Add the keys listed in [`.env.example`](.env.example) to the Infisical project and environment used by ComposeFlux. Generate unique values for `PG_PASS` and `AUTHENTIK_SECRET_KEY`. Add SMTP credentials only if email delivery is configured. Do not create or commit a plaintext env file.
+Add `PG_*` and `AUTHENTIK_*` values listed in [`.env.example`](.env.example) to `/authentik`; shared SMTP values belong in `/smtp`. Generate unique values for `PG_PASS` and `AUTHENTIK_SECRET_KEY`. Do not create or commit a plaintext env file.
 
 ## First login
 
@@ -26,4 +26,4 @@ The Restic job exports PostgreSQL containers to a temporary SQL dump before maki
 
 ## Email
 
-Configure the SMTP server, username, password, sender address, and port in Infisical. Authentik uses SSL for implicit TLS and disables STARTTLS in this Compose configuration. Keep email credentials out of the repository.
+Configure the SMTP server, username, password, sender address, and port in Infisical `/smtp`. Authentik uses SSL for implicit TLS and disables STARTTLS in this Compose configuration. Keep email credentials out of the repository.

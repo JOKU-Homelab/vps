@@ -40,7 +40,7 @@
         INFISICAL_DOMAIN: "{{ lookup('env', 'INFISICAL_DOMAIN') }}"
         INFISICAL_PROJECT_ID: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
         INFISICAL_ENVIRONMENT: "{{ lookup('env', 'INFISICAL_ENVIRONMENT') }}"
-        INFISICAL_SECRET_PATH: "{{ lookup('env', 'INFISICAL_SECRET_PATH') }}"
+        INFISICAL_SECRET_PATH: "{{ lookup('env', 'INFISICAL_SECRET_PATHS') }}"
         COMPOSEFLUX_GIT_REPO_URL: "{{ lookup('env', 'COMPOSEFLUX_GIT_REPO_URL') }}"
         COMPOSEFLUX_GIT_BRANCH: "{{ lookup('env', 'COMPOSEFLUX_GIT_BRANCH') | default('main', true) }}"
       register: composeflux_start

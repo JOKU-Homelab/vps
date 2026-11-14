@@ -4,7 +4,7 @@ This Compose project runs the Pangolin CLI site connector with Docker label disc
 
 ## Setup
 
-Create the Pangolin site after the dashboard's first-admin setup. Add `PANGOLIN_ENDPOINT`, `SITE_ID`, and `SITE_SECRET` from the site configuration to the Infisical project and environment used by ComposeFlux. The endpoint should be `https://pangolin.<base-domain>`. ComposeFlux starts this service after its Infisical identity is configured.
+Create the Pangolin site after the dashboard's first-admin setup. Add `PANGOLIN_ENDPOINT`, `SITE_ID`, and `SITE_SECRET` from the site configuration to `/pangolin-site` in the Infisical project and environment used by ComposeFlux. The endpoint should be `https://pangolin.<base-domain>`. ComposeFlux starts this service after its Infisical identity is configured.
 
 The connector mounts `/var/run/docker.sock` so it can discover labels. Docker socket access grants root-equivalent control of the VPS. Only merge trusted repository changes and restrict the ComposeFlux machine identity to the one deployment project.
 

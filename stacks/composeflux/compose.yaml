@@ -14,7 +14,7 @@ services:
       INFISICAL_SITE_URL: ${INFISICAL_DOMAIN:-https://eu.infisical.com}
       INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:?Set INFISICAL_PROJECT_ID in Infisical bootstrap config}
       INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
-      INFISICAL_SECRET_PATH: ${INFISICAL_SECRET_PATH:-/}
+      INFISICAL_SECRET_PATH: ${INFISICAL_SECRET_PATH:-/bootstrap,/smtp,/backup,/pangolin,/pangolin-site,/authentik,/backrest,/beszel,/databasement,/renovate,/composeflux}
       GIT_REPO_URL: ${COMPOSEFLUX_GIT_REPO_URL:?Set COMPOSEFLUX_GIT_REPO_URL in Infisical}
       GIT_BRANCH: ${COMPOSEFLUX_GIT_BRANCH:-main}
       PRUNE_INTERVAL: "0"

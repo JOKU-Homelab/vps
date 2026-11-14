@@ -1,0 +1,66 @@
+---
+- name: Seed folders and documented secrets into Infisical
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "{{ seed_manifest }}"
+  tasks:
+    - name: Authenticate to Infisical
+      infisical.vault.login:
+        url: "{{ lookup('env', 'INFISICAL_DOMAIN') }}"
+        auth_method: universal_auth
+        universal_auth_client_id: "{{ lookup('env', 'INFISICAL_CLIENT_ID') }}"
+        universal_auth_client_secret: "{{ lookup('env', 'INFISICAL_CLIENT_SECRET') }}"
+      register: infisical_login
+      no_log: true
+
+    - name: Read existing root folders
+      infisical.vault.read_folders:
+        login_data: "{{ infisical_login.login_data }}"
+        project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+        env_slug: "{{ lookup('env', 'INFISICAL_ENVIRONMENT') }}"
+        path: "/"
+      register: existing_folders
+      no_log: true
+
+    - name: Create service folders
+      infisical.vault.create_folder:
+        login_data: "{{ infisical_login.login_data }}"
+        project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+        env_slug: "{{ lookup('env', 'INFISICAL_ENVIRONMENT') }}"
+        path: "/"
+        name: "{{ item }}"
+        description: "Secrets used by the {{ item }} deployment."
+      loop: "{{ secret_folders }}"
+      when: item not in (existing_folders.folders | map(attribute='name') | list)
+      no_log: true
+
+    - name: Read existing secrets in each service folder
+      infisical.vault.read_secrets:
+        login_data: "{{ infisical_login.login_data }}"
+        project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+        env_slug: "{{ lookup('env', 'INFISICAL_ENVIRONMENT') }}"
+        path: "/{{ item }}"
+        as_dict: true
+      loop: "{{ secret_folders }}"
+      register: existing_secret_sets
+      no_log: true
+
+    - name: Index existing secrets by folder
+      ansible.builtin.set_fact:
+        existing_secrets_by_path: "{{ dict(existing_secret_sets.results | map(attribute='item') | zip(existing_secret_sets.results | map(attribute='secrets'))) }}"
+      no_log: true
+
+    - name: Create each secret with its use documented
+      infisical.vault.create_secret:
+        login_data: "{{ infisical_login.login_data }}"
+        project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') }}"
+        env_slug: "{{ lookup('env', 'INFISICAL_ENVIRONMENT') }}"
+        path: "{{ item.path }}"
+        secret_name: "{{ item.name }}"
+        secret_value: "{{ item.value }}"
+        secret_comment: "{{ item.comment }}"
+      loop: "{{ secrets }}"
+      when: item.name not in existing_secrets_by_path.get(item.path | regex_replace('^/', ''), {})
+      no_log: true

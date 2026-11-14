@@ -6,7 +6,7 @@ Persistent service data is bind-mounted beneath `/opt`; Docker named volumes are
 
 ## Infisical backup values
 
-Store these keys in the configured Infisical project/environment/path:
+Store these keys in the `/backup` folder of the configured Infisical project/environment:
 
 - `RESTIC_REPOSITORY` (for example `b2:bucket-name:repository-prefix`)
 - `B2_ACCOUNT_ID`

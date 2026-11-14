@@ -1,8 +1,8 @@
 # Renovate
 
-Renovate scans the repository's Compose manifests and opens pull requests for image updates. The self-hosted service runs continuously; its repository and fine-grained GitHub token are read from the Infisical project.
+Renovate scans the repository's Compose manifests and opens pull requests for image updates. The self-hosted service runs continuously; its repository and fine-grained GitHub token are read from the Infisical `/renovate` folder.
 
-Create a fine-grained token scoped to this repository and grant Renovate's documented permissions: **Contents: read and write**, **Pull requests: read and write**, **Commit statuses: read and write**, **Issues: read and write**, **Dependabot alerts: read**, and **Workflows: read and write**. Grant **Members: read** at organization level when applicable. Store `RENOVATE_REPOSITORIES` and `RENOVATE_TOKEN` in Infisical. Keep the write token separate from ComposeFlux's read-only HTTPS access.
+Create a fine-grained token scoped to this repository and grant Renovate's documented permissions: **Contents: read and write**, **Pull requests: read and write**, **Commit statuses: read and write**, **Issues: read and write**, **Dependabot alerts: read**, and **Workflows: read and write**. Grant **Members: read** at organization level when applicable. Store `RENOVATE_REPOSITORIES` and `RENOVATE_TOKEN` in `/renovate`. Keep the write token separate from ComposeFlux's read-only HTTPS access.
 
 ## Automerge
 

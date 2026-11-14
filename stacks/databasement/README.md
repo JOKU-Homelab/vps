@@ -6,7 +6,7 @@ The stack joins Pangolin's frontend network for the web route and an isolated `v
 
 ## Infisical values
 
-Add the keys listed in [`.env.example`](.env.example) to the ComposeFlux Infisical project. `APP_KEY`, OIDC client credentials, and SMTP credentials are secrets. URLs, domains, and the backup path are deployment configuration values. Do not commit a live `.env` file.
+Add Databasement values listed in [`.env.example`](.env.example) to `/databasement`; shared SMTP values belong in `/smtp`. `APP_KEY` and OIDC client credentials are secrets. URLs, domains, and the backup path are deployment configuration values. Do not commit a live `.env` file.
 
 ## First setup
 
@@ -22,4 +22,4 @@ Keep password login enabled until the OIDC flow has been tested. With auto-creat
 
 ## Email delivery
 
-Set the SMTP host, port, username, password, and sender address in Infisical. The Compose file uses implicit TLS. See the [notification guide](https://david-crty.github.io/databasement/self-hosting/configuration/notification/).
+Set the SMTP host, port, username, password, and sender address in Infisical `/smtp`. The Compose file uses implicit TLS. See the [notification guide](https://david-crty.github.io/databasement/self-hosting/configuration/notification/).

@@ -7,18 +7,54 @@ readonly CONFIG_FILE=/etc/vps-bootstrap/infisical.env
 [[ "$(stat -c '%u:%a' "$CONFIG_FILE")" == '0:600' ]] || { echo "vps-infisical-run: $CONFIG_FILE must be root-owned mode 0600" >&2; exit 1; }
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
-export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/run/vps-infisical}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/run/vps-infisical.$$}"
 mkdir -p "$XDG_CONFIG_HOME"
 chmod 0700 "$XDG_CONFIG_HOME"
+trap 'rm -rf "$XDG_CONFIG_HOME"' EXIT
 : "${INFISICAL_DOMAIN:?Missing INFISICAL_DOMAIN}"
 : "${INFISICAL_PROJECT_ID:?Missing INFISICAL_PROJECT_ID}"
 : "${INFISICAL_ENVIRONMENT:?Missing INFISICAL_ENVIRONMENT}"
-: "${INFISICAL_SECRET_PATH:?Missing INFISICAL_SECRET_PATH}"
+: "${INFISICAL_SECRET_PATHS:?Missing INFISICAL_SECRET_PATHS}"
 : "${INFISICAL_CLIENT_ID:?Missing INFISICAL_CLIENT_ID}"
 : "${INFISICAL_CLIENT_SECRET:?Missing INFISICAL_CLIENT_SECRET}"
 export INFISICAL_DOMAIN
-token="$(infisical login --method=universal-auth --client-id="$INFISICAL_CLIENT_ID" --client-secret="$INFISICAL_CLIENT_SECRET" --silent --plain)"
-[[ -n "$token" ]] || { echo 'vps-infisical-run: authentication returned no token' >&2; exit 1; }
+export INFISICAL_PROJECT_ID INFISICAL_ENVIRONMENT INFISICAL_SECRET_PATHS
+export INFISICAL_CLIENT_ID INFISICAL_CLIENT_SECRET
+token="$(infisical login --method=universal-auth --client-id="$INFISICAL_CLIENT_ID" --client-secret="$INFISICAL_CLIENT_SECRET" --silent --plain)" || { echo 'vps-infisical-run: authentication failed' >&2; exit 1; }
 export INFISICAL_TOKEN="$token"
-exec infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" \
-  --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH" -- "$@"
+[[ -n "$INFISICAL_TOKEN" ]] || { echo 'vps-infisical-run: authentication returned no token' >&2; exit 1; }
+export INFISICAL_TOKEN
+python3 -c "$(cat <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+command = sys.argv[1:]
+if not command:
+    raise SystemExit("vps-infisical-run: command required")
+merged = {}
+for path in filter(None, os.environ["INFISICAL_SECRET_PATHS"].split(",")):
+    result = subprocess.run(
+        ["infisical", "export", f"--projectId={os.environ['INFISICAL_PROJECT_ID']}",
+         f"--env={os.environ['INFISICAL_ENVIRONMENT']}", f"--path={path}",
+         "--format=json", "--silent"],
+        check=False, capture_output=True, text=True,
+    )
+    if result.returncode:
+        sys.stderr.write(f"vps-infisical-run: unable to read secret path {path}\n")
+        raise SystemExit(result.returncode)
+    try:
+        values = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        sys.stderr.write(f"vps-infisical-run: Infisical returned invalid JSON for {path}\n")
+        raise SystemExit(1)
+    if not isinstance(values, dict):
+        sys.stderr.write(f"vps-infisical-run: unexpected export from {path}\n")
+        raise SystemExit(1)
+    merged.update({str(key): str(value) for key, value in values.items()})
+if not merged:
+    raise SystemExit("vps-infisical-run: no secrets found in configured paths")
+os.execvpe(command[0], command, {**os.environ, **merged})
+PY
+)" "$@"

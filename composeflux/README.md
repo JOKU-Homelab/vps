@@ -8,13 +8,13 @@ The installer starts ComposeFlux only after the operator creates a Pangolin site
 
 ComposeFlux uses a dedicated read-only Universal Auth identity stored in `/etc/vps-bootstrap/composeflux.env` (root:root, mode `0600`). The installer uses a separate bootstrap identity for setup and backups, which should also be read-only after initial project seeding. Cloud is the default endpoint; a self-hosted instance can be selected with its HTTPS URL.
 
-ComposeFlux receives its Infisical endpoint, project ID, environment, path, and Git repository settings from the bootstrap environment and Infisical values. Keep the project limited to the secrets required by this repository because ComposeFlux can deploy any trusted Compose file in its managed Git checkout and has Docker socket access.
+ComposeFlux receives its Infisical endpoint, project ID, environment, a comma-separated set of secret paths, and Git repository settings from the bootstrap environment and Infisical values. The installer creates service folders (`/bootstrap`, `/smtp`, `/backup`, `/pangolin`, `/pangolin-site`, `/authentik`, `/backrest`, `/beszel`, `/databasement`, `/renovate`, and `/composeflux`) and ComposeFlux reads all of them. Keep the project limited to the secrets required by this repository because ComposeFlux can deploy any trusted Compose file in its managed Git checkout and has Docker socket access.
 
 ## Required stack values
 
-The installer seeds generated credentials and placeholder values. Complete the `CHANGE_ME` values in Infisical before continuing. Compose files declare required keys with Compose interpolation errors, so missing configuration fails visibly rather than silently deploying with empty credentials.
+The installer seeds generated credentials and placeholder values with comments describing each secret's purpose. Complete the `CHANGE_ME` values in the matching service folder before continuing. Compose files declare required keys with Compose interpolation errors, so missing configuration fails visibly rather than silently deploying with empty credentials.
 
-Pangolin's first administrator and site are created through its UI. There is no environment-variable first-admin bootstrap. Then add `PANGOLIN_ENDPOINT`, `SITE_ID`, and `SITE_SECRET` to Infisical and continue the installer.
+Pangolin's first administrator and site are created through its UI. There is no environment-variable first-admin bootstrap. Then add `PANGOLIN_ENDPOINT`, `SITE_ID`, and `SITE_SECRET` to `/pangolin-site` and continue the installer. Add comments to any additional secrets you create manually, describing which service uses them and what they configure.
 
 For CLI use, Universal Auth follows Infisical's documented machine identity flow:
 
@@ -24,7 +24,7 @@ export INFISICAL_TOKEN="$(infisical login --method=universal-auth \
   --client-id="$INFISICAL_CLIENT_ID" \
   --client-secret="$INFISICAL_CLIENT_SECRET" --silent --plain)"
 infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" \
-  --env=prod --path=/ -- docker compose up -d
+  --env=prod --path=/composeflux -- docker compose up -d
 ```
 
 Omit the default domain override only when using Infisical Cloud's default endpoint. For regional Cloud or self-hosted endpoints, use the URL shown by that Infisical instance.

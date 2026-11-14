@@ -6,6 +6,7 @@ readonly REPOSITORY_URL_DEFAULT="https://github.com/JOKU-Homelab/vps.git"
 readonly DEFAULT_REF="main"
 readonly INSTALL_ROOT="/opt/vps"
 readonly BOOTSTRAP_DIR="/etc/vps-bootstrap"
+readonly DEFAULT_INFISICAL_SECRET_PATHS="/bootstrap,/smtp,/backup,/pangolin,/pangolin-site,/authentik,/backrest,/beszel,/databasement,/renovate,/composeflux"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
@@ -35,7 +36,7 @@ USAGE
 done
 
 info "Installing Git, Python, Ansible, OpenSSL, and Infisical CLI"
-dnf install -y git python3 ansible-core openssl curl
+dnf install -y git python3 python3-pip ansible-core openssl curl
 if ! command -v infisical >/dev/null 2>&1; then
   curl -1sLf 'https://artifacts-cli.infisical.com/setup.rpm.sh' | bash
   dnf install -y infisical
@@ -97,12 +98,13 @@ fi
 prompt_bootstrap_value INFISICAL_DOMAIN "Infisical URL (Cloud default https://eu.infisical.com)" "https://eu.infisical.com"
 prompt_bootstrap_value INFISICAL_PROJECT_ID "Infisical project ID"
 prompt_bootstrap_value INFISICAL_ENVIRONMENT "Infisical environment" "prod"
-prompt_bootstrap_value INFISICAL_SECRET_PATH "Infisical secret path" "/"
 prompt_bootstrap_value INFISICAL_CLIENT_ID "Universal Auth client ID"
 prompt_bootstrap_value INFISICAL_CLIENT_SECRET "Universal Auth client secret" "" true
+INFISICAL_SECRET_PATHS="${INFISICAL_SECRET_PATHS:-$DEFAULT_INFISICAL_SECRET_PATHS}"
+save_bootstrap_value INFISICAL_SECRET_PATHS "$INFISICAL_SECRET_PATHS"
 [[ "$INFISICAL_DOMAIN" == https://* ]] || die "Infisical URL must use HTTPS."
 [[ -n "${INFISICAL_DOMAIN:-}" && -n "${INFISICAL_PROJECT_ID:-}" && -n "${INFISICAL_CLIENT_ID:-}" && -n "${INFISICAL_CLIENT_SECRET:-}" ]] || die "Incomplete $cloud_config."
-export INFISICAL_DOMAIN INFISICAL_PROJECT_ID INFISICAL_ENVIRONMENT INFISICAL_SECRET_PATH INFISICAL_CLIENT_ID INFISICAL_CLIENT_SECRET
+export INFISICAL_DOMAIN INFISICAL_PROJECT_ID INFISICAL_ENVIRONMENT INFISICAL_SECRET_PATHS INFISICAL_CLIENT_ID INFISICAL_CLIENT_SECRET
 refresh_infisical_token() {
   INFISICAL_TOKEN="$(infisical login --method=universal-auth --client-id="$INFISICAL_CLIENT_ID" --client-secret="$INFISICAL_CLIENT_SECRET" --silent --plain)" || die "Infisical Universal Auth login failed."
   [[ -n "$INFISICAL_TOKEN" ]] || die "Infisical did not return an access token."
@@ -113,34 +115,61 @@ repository_url="$REPOSITORY_URL_DEFAULT"
 ref="$DEFAULT_REF"
 [[ -z "$restore_override" || "$restore_override" =~ ^(latest|[A-Fa-f0-9]{4,64})$ ]] || die "Snapshot must be 'latest' or a hexadecimal Restic snapshot ID."
 
+info "Fetching repository ref $ref"
+install -d -o root -g root -m 0755 "$INSTALL_ROOT"
+if [[ -d "$repo_dir/.git" ]]; then
+  git -C "$repo_dir" fetch --depth 1 origin "$ref"
+  git -C "$repo_dir" checkout --force FETCH_HEAD
+else
+  git clone --depth 1 --branch "$ref" "$repository_url" "$repo_dir" || git clone --depth 1 "$repository_url" "$repo_dir"
+  [[ "$ref" == "$DEFAULT_REF" ]] || git -C "$repo_dir" checkout --detach "$ref"
+fi
+
+info "Installing Ansible collections and Infisical secret support"
+export ANSIBLE_CONFIG="$repo_dir/ansible/ansible.cfg"
+ansible-galaxy collection install -r "$repo_dir/ansible/requirements.yml"
+python3 -m pip install --user infisicalsdk
+
 if ! grep -qx 'INFISICAL_BOOTSTRAP_SEEDED=1' "$cloud_config"; then
-  needs_initial_setup=false
-  refresh_infisical_token
-  if infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" \
-    --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH" -- bash -euc 'test -n "${SERVER_SECRET:-}"' >/dev/null 2>&1; then
-    # Rebuilds and restores can use a read-only identity once the project was seeded.
-    printf 'INFISICAL_BOOTSTRAP_SEEDED=1\n' >>"$cloud_config"
-  else
   needs_initial_setup=true
-  seed_file="$(mktemp /run/infisical-bootstrap.XXXXXX)"
+  refresh_infisical_token
+  seed_file="$(mktemp /run/infisical-bootstrap.XXXXXX.json)"
   chmod 0600 "$seed_file"
   trap 'rm -f "${seed_file:-}"' EXIT
-  printf 'SERVER_SECRET=%s\n' "$(openssl rand -base64 48 | tr -d '\n')" >"$seed_file"
-  printf 'VPS_BASE_DOMAIN=CHANGE_ME\nVPS_ADMIN_EMAIL=CHANGE_ME\nVPS_ADMIN_USER=admin\nVPS_ADMIN_SSH_PUBLIC_KEY=CHANGE_ME\n' >>"$seed_file"
-  printf 'SMTP_ENABLED=no\nSMTP_HOST=CHANGE_ME\nSMTP_PORT=465\nSMTP_USERNAME=CHANGE_ME\nSMTP_PASSWORD=CHANGE_ME\nSMTP_FROM_ADDRESS=CHANGE_ME\nSMTP_SECURE=true\n' >>"$seed_file"
-  printf 'RESTIC_REPOSITORY=CHANGE_ME\nB2_ACCOUNT_ID=CHANGE_ME\nB2_ACCOUNT_KEY=CHANGE_ME\nRESTIC_PASSWORD=%s\n' "$(openssl rand -hex 32)" >>"$seed_file"
-  printf 'PG_USER=authentik\nPG_DB=authentik\nPG_PASS=%s\nAUTHENTIK_SECRET_KEY=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 48)" >>"$seed_file"
-  printf 'AUTHENTIK_URL=CHANGE_ME\nAUTHENTIK_DOMAIN=CHANGE_ME\nBACKREST_DOMAIN=CHANGE_ME\nBESZEL_URL=CHANGE_ME\nBESZEL_DOMAIN=CHANGE_ME\n' >>"$seed_file"
-  printf 'DATABASEMENT_URL=CHANGE_ME\nDATABASEMENT_DOMAIN=CHANGE_ME\nAPP_KEY=base64:%s\n' "$(openssl rand -base64 32 | tr -d '\n')" >>"$seed_file"
-  printf 'PANGOLIN_ENDPOINT=CHANGE_ME\nSITE_ID=CHANGE_ME\nSITE_SECRET=CHANGE_ME\nRENOVATE_REPOSITORIES=CHANGE_ME\nRENOVATE_TOKEN=CHANGE_ME\nTZ=Europe/Zurich\n' >>"$seed_file"
-  printf 'COMPOSEFLUX_CLIENT_ID=CHANGE_ME\nCOMPOSEFLUX_CLIENT_SECRET=CHANGE_ME\n' >>"$seed_file"
-  printf 'COMPOSEFLUX_GIT_REPO_URL=%s\nCOMPOSEFLUX_GIT_BRANCH=%s\n' "$repository_url" "$ref" >>"$seed_file"
+  export SEED_SERVER_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+  export SEED_RESTIC_PASSWORD="$(openssl rand -hex 32)"
+  export SEED_PG_PASS="$(openssl rand -hex 32)"
+  export SEED_AUTHENTIK_SECRET_KEY="$(openssl rand -hex 48)"
+  export SEED_APP_KEY="base64:$(openssl rand -base64 32 | tr -d '\n')"
+  export SEED_REPOSITORY_URL="$repository_url" SEED_REPOSITORY_REF="$ref"
+  SEED_MANIFEST="$seed_file" python3 - <<'PY'
+import json, os
+secret_folders = ["bootstrap", "smtp", "backup", "pangolin", "pangolin-site", "authentik", "backrest", "beszel", "databasement", "renovate", "composeflux"]
+specs = {
+ "bootstrap": [("VPS_BASE_DOMAIN","CHANGE_ME","Public base domain used to build service hostnames."),("VPS_ADMIN_EMAIL","CHANGE_ME","Email address used for TLS certificate registration."),("VPS_ADMIN_USER","admin","Linux administrator account created by Ansible."),("VPS_ADMIN_SSH_PUBLIC_KEY","CHANGE_ME","SSH public key authorized for the administrator account."),("TZ","Europe/Zurich","Timezone used by scheduled jobs and services.")],
+ "smtp": [("SMTP_ENABLED","no","Enables outbound email delivery when set to yes."),("SMTP_HOST","CHANGE_ME","SMTP server hostname."),("SMTP_PORT","465","SMTP server port; Migadu implicit TLS uses 465."),("SMTP_USERNAME","CHANGE_ME","Username used to authenticate to the SMTP server."),("SMTP_PASSWORD","CHANGE_ME","Password used to authenticate to the SMTP server."),("SMTP_FROM_ADDRESS","CHANGE_ME","Sender address used for service email."),("SMTP_SECURE","true","Enables implicit TLS for SMTP connections.")],
+ "backup": [("RESTIC_REPOSITORY","CHANGE_ME","Remote Restic repository location for encrypted backups."),("B2_ACCOUNT_ID","CHANGE_ME","Backblaze B2 account identifier for backup storage."),("B2_ACCOUNT_KEY","CHANGE_ME","Backblaze B2 application key for backup storage."),("RESTIC_PASSWORD",os.environ["SEED_RESTIC_PASSWORD"],"Encryption password required to read and restore Restic snapshots.")],
+ "pangolin": [("SERVER_SECRET",os.environ["SEED_SERVER_SECRET"],"Secret key used by the Pangolin server to protect session and application data.")],
+ "pangolin-site": [("PANGOLIN_ENDPOINT","CHANGE_ME","Public URL of the Pangolin server used by the site connector."),("SITE_ID","CHANGE_ME","Pangolin site identifier for this VPS."),("SITE_SECRET","CHANGE_ME","Authentication secret for this Pangolin site.")],
+ "authentik": [("PG_USER","authentik","PostgreSQL role used by Authentik."),("PG_DB","authentik","PostgreSQL database used by Authentik."),("PG_PASS",os.environ["SEED_PG_PASS"],"PostgreSQL password used by Authentik."),("AUTHENTIK_SECRET_KEY",os.environ["SEED_AUTHENTIK_SECRET_KEY"],"Application signing and encryption key used by Authentik."),("AUTHENTIK_URL","CHANGE_ME","Public URL configured as Authentik's base URL."),("AUTHENTIK_DOMAIN","CHANGE_ME","Public hostname for the Authentik resource.")],
+ "backrest": [("BACKREST_DOMAIN","CHANGE_ME","Public hostname for the Backrest backup interface.")],
+ "beszel": [("BESZEL_URL","CHANGE_ME","Public URL configured for the Beszel Hub."),("BESZEL_DOMAIN","CHANGE_ME","Public hostname for the Beszel resource.")],
+ "databasement": [("DATABASEMENT_URL","CHANGE_ME","Public URL configured for Databasement."),("DATABASEMENT_DOMAIN","CHANGE_ME","Public hostname for the Databasement resource."),("APP_KEY",os.environ["SEED_APP_KEY"],"Application encryption key used by Databasement."),("OAUTH_OIDC_ENABLED","false","Enables OpenID Connect login for Databasement when configured."),("OAUTH_OIDC_CLIENT_ID","CHANGE_ME","Authentik OAuth client ID used by Databasement."),("OAUTH_OIDC_CLIENT_SECRET","CHANGE_ME","Authentik OAuth client secret used by Databasement."),("OAUTH_OIDC_BASE_URL","CHANGE_ME","Authentik OpenID Connect issuer URL used by Databasement."),("OAUTH_OIDC_LABEL","Authentik","Display label for the Databasement OpenID Connect login option."),("OAUTH_AUTO_CREATE_USERS","false","Allows first-time OpenID Connect login to create Databasement users."),("OAUTH_AUTO_LINK_BY_EMAIL","true","Links OpenID Connect users to existing accounts with the same email.")],
+ "renovate": [("RENOVATE_REPOSITORIES","CHANGE_ME","GitHub repository Renovate is allowed to update."),("RENOVATE_TOKEN","CHANGE_ME","GitHub token used by Renovate to create update pull requests.")],
+ "composeflux": [("COMPOSEFLUX_CLIENT_ID","CHANGE_ME","Universal Auth client ID for ComposeFlux read-only access."),("COMPOSEFLUX_CLIENT_SECRET","CHANGE_ME","Universal Auth client secret for ComposeFlux read-only access."),("COMPOSEFLUX_GIT_REPO_URL",os.environ["SEED_REPOSITORY_URL"],"Git repository URL ComposeFlux reconciles."),("COMPOSEFLUX_GIT_BRANCH",os.environ["SEED_REPOSITORY_REF"],"Git branch or ref ComposeFlux reconciles.")]
+}
+secrets=[]
+for folder, entries in specs.items():
+    for name, value, comment in entries:
+        secrets.append({"path":"/"+folder,"name":name,"value":value,"comment":comment})
+with open(os.environ["SEED_MANIFEST"], "w") as f:
+    json.dump({"secret_folders":secret_folders,"secrets":secrets}, f)
+PY
   printf 'Required secrets and first-run configuration are being initialized in Infisical.\n'
-  infisical secrets set --file="$seed_file" --projectId="$INFISICAL_PROJECT_ID" --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH"
+  ansible-playbook -i 'localhost,' -c local "$repo_dir/ansible/playbooks/seed-infisical.yml" --extra-vars "seed_manifest=$seed_file"
   rm -f "$seed_file"
   trap - EXIT
   printf 'INFISICAL_BOOTSTRAP_SEEDED=1\n' >>"$cloud_config"
-  fi
 else
   needs_initial_setup=false
 fi
@@ -149,11 +178,14 @@ cat <<'PROMPT'
 
 Infisical now contains generated bootstrap secrets and configuration placeholders.
 Open the project in Infisical and fill the first-run values still set to CHANGE_ME:
-  VPS_BASE_DOMAIN, VPS_ADMIN_EMAIL, VPS_ADMIN_SSH_PUBLIC_KEY
-  SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_ADDRESS (or leave SMTP_ENABLED=no)
-  RESTIC_REPOSITORY, B2_ACCOUNT_ID, B2_ACCOUNT_KEY
-  AUTHENTIK_URL, AUTHENTIK_DOMAIN, BACKREST_DOMAIN, BESZEL_URL, BESZEL_DOMAIN
-  DATABASEMENT_URL, DATABASEMENT_DOMAIN, RENOVATE_REPOSITORIES, RENOVATE_TOKEN
+  /bootstrap: VPS_BASE_DOMAIN, VPS_ADMIN_EMAIL, VPS_ADMIN_SSH_PUBLIC_KEY
+  /smtp: SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_ADDRESS (or keep SMTP_ENABLED=no)
+  /backup: RESTIC_REPOSITORY, B2_ACCOUNT_ID, B2_ACCOUNT_KEY
+  /authentik: AUTHENTIK_URL, AUTHENTIK_DOMAIN
+  /backrest: BACKREST_DOMAIN; /beszel: BESZEL_URL, BESZEL_DOMAIN
+  /databasement: DATABASEMENT_URL, DATABASEMENT_DOMAIN
+  /renovate: RENOVATE_REPOSITORIES, RENOVATE_TOKEN
+Every installer-created secret has a comment describing its purpose.
 Change VPS_ADMIN_USER if you do not want the default "admin". After Pangolin's
 first-run setup, create a read-only Infisical machine identity for ComposeFlux
 and set COMPOSEFLUX_CLIENT_ID and COMPOSEFLUX_CLIENT_SECRET in this project.
@@ -170,8 +202,7 @@ fi
 
 validate_secrets() {
   refresh_infisical_token
-  infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" \
-    --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH" -- bash -euc '
+  "$repo_dir/ansible/files/vps-infisical-run" bash -euc '
       for key in VPS_BASE_DOMAIN VPS_ADMIN_EMAIL VPS_ADMIN_SSH_PUBLIC_KEY SERVER_SECRET RESTIC_REPOSITORY B2_ACCOUNT_ID B2_ACCOUNT_KEY RESTIC_PASSWORD AUTHENTIK_SECRET_KEY AUTHENTIK_URL AUTHENTIK_DOMAIN BACKREST_DOMAIN BESZEL_URL BESZEL_DOMAIN DATABASEMENT_URL DATABASEMENT_DOMAIN APP_KEY RENOVATE_REPOSITORIES RENOVATE_TOKEN COMPOSEFLUX_GIT_REPO_URL; do
         value="${!key:-}"
         [[ -n "$value" && "$value" != CHANGE_ME ]] || { echo "Infisical secret $key is empty or still CHANGE_ME" >&2; exit 1; }
@@ -198,25 +229,12 @@ if [[ -f "$BOOTSTRAP_DIR/composeflux.env" ]] && ! grep -qx 'INFISICAL_READONLY_C
   rm -f "$BOOTSTRAP_DIR/composeflux.env"
 fi
 
-info "Fetching repository ref $ref"
-install -d -o root -g root -m 0755 "$INSTALL_ROOT"
-if [[ -d "$repo_dir/.git" ]]; then
-  git -C "$repo_dir" fetch --depth 1 origin "$ref"
-  git -C "$repo_dir" checkout --force FETCH_HEAD
-else
-  git clone --depth 1 --branch "$ref" "$repository_url" "$repo_dir" || git clone --depth 1 "$repository_url" "$repo_dir"
-  [[ "$ref" == "$DEFAULT_REF" ]] || git -C "$repo_dir" checkout --detach "$ref"
-fi
-
-info "Installing Ansible collections and initializing the host"
-export ANSIBLE_CONFIG="$repo_dir/ansible/ansible.cfg"
-ansible-galaxy collection install -r "$repo_dir/ansible/requirements.yml"
+info "Initializing the host"
 refresh_infisical_token
-cloud_run=(infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH" --)
 ansible_extra_vars=()
 if [[ -n "$restore_override" ]]; then ansible_extra_vars+=(--extra-vars "vps_restore_snapshot=$restore_override"); fi
-"${cloud_run[@]}" ansible-playbook -i 'localhost,' -c local "$repo_dir/ansible/playbooks/initialize-vps.yml" "${ansible_extra_vars[@]}"
-if [[ -z "$restore_override" ]]; then "${cloud_run[@]}" /usr/local/sbin/vps-backup init; fi
+"$repo_dir/ansible/files/vps-infisical-run" ansible-playbook -i 'localhost,' -c local "$repo_dir/ansible/playbooks/initialize-vps.yml" "${ansible_extra_vars[@]}"
+if [[ -z "$restore_override" ]]; then "$repo_dir/ansible/files/vps-infisical-run" /usr/local/sbin/vps-backup init; fi
 
 if [[ -z "$restore_override" && ! -f "$BOOTSTRAP_DIR/composeflux.env" ]]; then
   cat <<'PANGOLIN_SETUP'
@@ -237,8 +255,7 @@ fi
 
 validate_managed_secrets() {
   refresh_infisical_token
-  infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" \
-    --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH" -- bash -euc '
+  "$repo_dir/ansible/files/vps-infisical-run" bash -euc '
       for key in PANGOLIN_ENDPOINT SITE_ID SITE_SECRET COMPOSEFLUX_CLIENT_ID COMPOSEFLUX_CLIENT_SECRET; do
         value="${!key:-}"
         [[ -n "$value" && "$value" != CHANGE_ME ]] || { echo "Infisical secret $key is empty or still CHANGE_ME" >&2; exit 1; }
@@ -251,8 +268,7 @@ until validate_managed_secrets; do
 done
 
 refresh_infisical_token
-cloud_run=(infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH" --)
-"${cloud_run[@]}" python3 - <<'PY'
+"$repo_dir/ansible/files/vps-infisical-run" python3 - <<'PY'
 import os, pathlib, shlex
 p=pathlib.Path('/etc/vps-bootstrap/composeflux.env')
 values={
@@ -260,7 +276,7 @@ values={
     'INFISICAL_DOMAIN':os.environ['INFISICAL_DOMAIN'],
     'INFISICAL_PROJECT_ID':os.environ['INFISICAL_PROJECT_ID'],
     'INFISICAL_ENVIRONMENT':os.environ['INFISICAL_ENVIRONMENT'],
-    'INFISICAL_SECRET_PATH':os.environ['INFISICAL_SECRET_PATH'],
+    'INFISICAL_SECRET_PATH':os.environ['INFISICAL_SECRET_PATHS'],
     'INFISICAL_CLIENT_ID':os.environ['COMPOSEFLUX_CLIENT_ID'],
     'INFISICAL_CLIENT_SECRET':os.environ['COMPOSEFLUX_CLIENT_SECRET'],
 }
@@ -269,8 +285,7 @@ p.chmod(0o600); os.chown(p,0,0)
 PY
 
 refresh_infisical_token
-cloud_run=(infisical run --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" --env="$INFISICAL_ENVIRONMENT" --path="$INFISICAL_SECRET_PATH" --)
-"${cloud_run[@]}" ansible-playbook -i 'localhost,' -c local "$repo_dir/ansible/playbooks/enable-gitops.yml"
+"$repo_dir/ansible/files/vps-infisical-run" ansible-playbook -i 'localhost,' -c local "$repo_dir/ansible/playbooks/enable-gitops.yml"
 
 cat <<DONE
 
