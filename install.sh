@@ -184,11 +184,19 @@ if [[ "$smtp_enabled" == yes ]]; then
   smtp_from_address="${smtp_from_address:-${VPS_SMTP_FROM_ADDRESS:-}}"
   smtp_secure="${smtp_secure:-${VPS_SMTP_SECURE:-}}"
   collect_value smtp_host smtp_host "SMTP host"
-  collect_value smtp_port smtp_port "SMTP port" "587"
+  collect_value smtp_port smtp_port "SMTP port" "465"
   collect_value smtp_username smtp_username "SMTP username"
   collect_value smtp_password smtp_password "SMTP password" "" true
   collect_value smtp_from_address smtp_from_address "SMTP sender address"
-  collect_value smtp_secure smtp_secure "Use implicit TLS (typically port 465)? (yes/no)" "no"
+  smtp_secure_default=no
+  [[ "$smtp_port" == 465 ]] && smtp_secure_default=yes
+  collect_value smtp_secure smtp_secure "Use implicit TLS (typically port 465)? (yes/no)" "$smtp_secure_default"
+  if [[ "${smtp_host,,}" == smtp.migadu.com && "$smtp_port" == 587 ]]; then
+    smtp_port=465
+    smtp_secure=yes
+    persist_config setting smtp_port "$smtp_port"
+    persist_config setting smtp_secure "$smtp_secure"
+  fi
 else
   smtp_host=""; smtp_port=""; smtp_username=""; smtp_password=""; smtp_from_address=""; smtp_secure="no"
 fi
@@ -271,19 +279,79 @@ p.write_text("\n".join(output)+"\n"); p.chmod(0o600); os.chown(p,0,0)
 PY
 
 python3 - <<'PY'
-import base64, os, pathlib, secrets
+import base64, os, pathlib, secrets, shlex
 boot=pathlib.Path('/etc/vps-bootstrap')
-def write_env(path, values):
-    path.write_text(''.join(f'{k}={v}\n' for k,v in values.items())); path.chmod(0o600); os.chown(path,0,0)
+def decode_value(raw):
+    raw=raw.strip()
+    if not raw: return ''
+    try:
+        values=shlex.split(raw, posix=True)
+        return values[0] if len(values)==1 else raw
+    except ValueError:
+        return raw
+def env_value(value):
+    value=str(value)
+    if not value: return "''"
+    if all(c.isalnum() or c in '._:/@+-' for c in value): return value
+    return "'" + value.replace("'", "\\'") + "'"
+def merge_env(path, defaults):
+    lines=path.read_text().splitlines() if path.exists() else []
+    current={}
+    for line in lines:
+        if '=' in line and not line.lstrip().startswith('#'):
+            key,raw=line.split('=',1); current[key]=decode_value(raw)
+    values={key:(current.get(key) or str(value)) for key,value in defaults.items()}
+    found=set(); result=[]
+    for line in lines:
+        key=line.split('=',1)[0] if '=' in line else ''
+        if key in values:
+            if current.get(key): result.append(line)
+            else: result.append(f'{key}={env_value(values[key])}')
+            found.add(key)
+        else: result.append(line)
+    for key,value in values.items():
+        if key not in found: result.append(f'{key}={env_value(value)}')
+    path.write_text('\n'.join(result)+'\n'); path.chmod(0o600); os.chown(path,0,0)
 domain=os.environ['base_domain']; email=os.environ['admin_email']
-if not (boot/'infisical.env').exists():
-    enc=secrets.token_hex(16); auth=base64.b64encode(secrets.token_bytes(32)).decode(); pg=secrets.token_hex(32); redis=secrets.token_hex(32)
-    write_env(boot/'infisical.env', {'ENCRYPTION_KEY':enc,'AUTH_SECRET':auth,'POSTGRES_USER':'infisical','POSTGRES_PASSWORD':pg,'POSTGRES_DB':'infisical','DB_CONNECTION_URI':f'postgresql://infisical:{pg}@db:5432/infisical','REDIS_PASSWORD':redis,'REDIS_URL':f'redis://:{redis}@redis:6379/0','SITE_URL':f'https://infisical.{domain}','INFISICAL_PUBLIC_DOMAIN':f'infisical.{domain}'})
-if not (boot/'pangolin.env').exists():
-    secret=base64.b64encode(secrets.token_bytes(48)).decode()
-    write_env(boot/'pangolin.env', {'SERVER_SECRET':secret,'BASE_DOMAIN':domain,'PANGOLIN_DOMAIN':f'pangolin.{domain}','LETSENCRYPT_EMAIL':email,'INFISICAL_PUBLIC_DOMAIN':f'infisical.{domain}'})
-if not (boot/'composeflux.env').exists():
-    write_env(boot/'composeflux.env', {'GIT_REPO_URL':os.environ['repository_url'],'GIT_BRANCH':os.environ['ref'],'INFISICAL_SITE_URL':'http://infisical-api:8080','INFISICAL_ENVIRONMENT':'prod','INFISICAL_PROJECT_ID':'SET_AFTER_INFISICAL_SETUP','INFISICAL_CLIENT_ID':'SET_AFTER_INFISICAL_SETUP','INFISICAL_CLIENT_SECRET':'SET_AFTER_INFISICAL_SETUP','INFISICAL_SECRET_PATH':'/'})
+infisical_path=boot/'infisical.env'
+existing={}
+if infisical_path.exists():
+    for line in infisical_path.read_text().splitlines():
+        if '=' in line and not line.lstrip().startswith('#'):
+            key,raw=line.split('=',1); existing[key]=decode_value(raw)
+pg_user=existing.get('POSTGRES_USER') or 'infisical'
+pg_password=existing.get('POSTGRES_PASSWORD') or secrets.token_hex(32)
+pg_db=existing.get('POSTGRES_DB') or 'infisical'
+redis_password=existing.get('REDIS_PASSWORD') or secrets.token_hex(32)
+merge_env(infisical_path, {
+    'ENCRYPTION_KEY':existing.get('ENCRYPTION_KEY') or secrets.token_hex(16),
+    'AUTH_SECRET':existing.get('AUTH_SECRET') or base64.b64encode(secrets.token_bytes(32)).decode(),
+    'POSTGRES_USER':pg_user,
+    'POSTGRES_PASSWORD':pg_password,
+    'POSTGRES_DB':pg_db,
+    'DB_CONNECTION_URI':f'postgresql://{pg_user}:{pg_password}@db:5432/{pg_db}',
+    'REDIS_PASSWORD':redis_password,
+    'REDIS_URL':f'redis://:{redis_password}@redis:6379/0',
+    'SITE_URL':f'https://infisical.{domain}',
+    'INFISICAL_PUBLIC_DOMAIN':f'infisical.{domain}',
+})
+merge_env(boot/'pangolin.env', {
+    'SERVER_SECRET':base64.b64encode(secrets.token_bytes(48)).decode(),
+    'BASE_DOMAIN':domain,
+    'PANGOLIN_DOMAIN':f'pangolin.{domain}',
+    'LETSENCRYPT_EMAIL':email,
+    'INFISICAL_PUBLIC_DOMAIN':f'infisical.{domain}',
+})
+merge_env(boot/'composeflux.env', {
+    'GIT_REPO_URL':os.environ['repository_url'],
+    'GIT_BRANCH':os.environ['ref'],
+    'INFISICAL_SITE_URL':'http://infisical-api:8080',
+    'INFISICAL_ENVIRONMENT':'prod',
+    'INFISICAL_PROJECT_ID':'SET_AFTER_INFISICAL_SETUP',
+    'INFISICAL_CLIENT_ID':'SET_AFTER_INFISICAL_SETUP',
+    'INFISICAL_CLIENT_SECRET':'SET_AFTER_INFISICAL_SETUP',
+    'INFISICAL_SECRET_PATH':'/',
+})
 
 smtp={
     'SMTP_ENABLED':os.environ['smtp_enabled'],
@@ -294,10 +362,6 @@ smtp={
     'SMTP_FROM_ADDRESS':os.environ['smtp_from_address'],
     'SMTP_SECURE':'true' if os.environ['smtp_secure']=='yes' else 'false',
 }
-def env_value(value):
-    if not value: return "''"
-    if all(c.isalnum() or c in '._:/@+-' for c in value): return value
-    return "'" + value.replace("'", "\\'") + "'"
 for name in ('infisical.env','pangolin.env'):
     path=boot/name
     lines=path.read_text().splitlines()

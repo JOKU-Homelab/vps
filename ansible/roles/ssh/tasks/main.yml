@@ -32,7 +32,7 @@
       KbdInteractiveAuthentication no
       PermitRootLogin no
       PermitEmptyPasswords no
-      MaxAuthTries 5
+      MaxAuthTries 25
       LoginGraceTime 30
       X11Forwarding no
       AllowAgentForwarding no
@@ -73,7 +73,7 @@
       - "'kbdinteractiveauthentication no' in sshd_effective_config.stdout_lines"
       - "'permitrootlogin no' in sshd_effective_config.stdout_lines"
       - "'permitemptypasswords no' in sshd_effective_config.stdout_lines"
-      - "'maxauthtries 5' in sshd_effective_config.stdout_lines"
+      - "'maxauthtries 25' in sshd_effective_config.stdout_lines"
       - "'logingracetime 30' in sshd_effective_config.stdout_lines"
       - "'x11forwarding no' in sshd_effective_config.stdout_lines"
       - "'allowagentforwarding no' in sshd_effective_config.stdout_lines"
