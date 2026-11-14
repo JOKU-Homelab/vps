@@ -19,7 +19,7 @@ Pangolin's first administrator and site are created through its UI. There is no 
 For CLI use, Universal Auth follows Infisical's documented machine identity flow:
 
 ```bash
-export INFISICAL_DOMAIN=https://app.infisical.com
+export INFISICAL_DOMAIN=https://eu.infisical.com
 export INFISICAL_TOKEN="$(infisical login --method=universal-auth \
   --client-id="$INFISICAL_CLIENT_ID" \
   --client-secret="$INFISICAL_CLIENT_SECRET" --silent --plain)"

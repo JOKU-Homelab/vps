@@ -6,7 +6,7 @@ The installer runs Ansible locally on the VPS. Ansible hardens the host, install
 
 Before running the installer, create a project and a Universal Auth machine identity with read/write access to the selected environment and path. The installer asks for:
 
-- Infisical HTTPS endpoint (`https://app.infisical.com` by default; a self-hosted URL is accepted)
+- Infisical HTTPS endpoint (`https://eu.infisical.com` by default; a self-hosted URL is accepted)
 - Project ID, environment, and secret path
 - Universal Auth client ID and secret
 

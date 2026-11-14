@@ -94,7 +94,7 @@ else
   install -o root -g root -m 0600 /dev/null "$cloud_config"
   printf 'INFISICAL_CONNECTION_CONFIG=1\n' >"$cloud_config"
 fi
-prompt_bootstrap_value INFISICAL_DOMAIN "Infisical URL (Cloud default https://app.infisical.com)" "https://app.infisical.com"
+prompt_bootstrap_value INFISICAL_DOMAIN "Infisical URL (Cloud default https://eu.infisical.com)" "https://eu.infisical.com"
 prompt_bootstrap_value INFISICAL_PROJECT_ID "Infisical project ID"
 prompt_bootstrap_value INFISICAL_ENVIRONMENT "Infisical environment" "prod"
 prompt_bootstrap_value INFISICAL_SECRET_PATH "Infisical secret path" "/"

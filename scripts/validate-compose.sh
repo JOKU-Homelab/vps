@@ -10,7 +10,7 @@ while IFS= read -r compose_file; do
   trap 'rm -rf "$temp_dir"' EXIT
   if [[ "$compose_file" == */stacks/composeflux/compose.yaml ]]; then
     cat >"$temp_dir/composeflux.env" <<'ENV'
-INFISICAL_DOMAIN=https://app.infisical.com
+INFISICAL_DOMAIN=https://eu.infisical.com
 INFISICAL_ENVIRONMENT=prod
 INFISICAL_PROJECT_ID=validation
 INFISICAL_CLIENT_ID=validation
