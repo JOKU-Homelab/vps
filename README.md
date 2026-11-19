@@ -4,6 +4,14 @@ Infrastructure as code for an AlmaLinux/RHEL VPS. Host automation, Compose files
 
 ## Install
 
+To apply host hardening only, without Docker or application stacks:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JOKU-Homelab/vps/main/install-hardening.sh | sudo bash
+```
+
+This creates or updates `/etc/vps-bootstrap/init.json` as you enter the admin username and SSH public key. It enables host security components (firewalld and CrowdSec) and automatic security updates, but does not install Docker or deploy application stacks.
+
 Create an Infisical project and a Universal Auth machine identity with read/write access to the project path used by the installer. Store the project configuration values in that project. The installer defaults to Infisical Cloud, and accepts a custom HTTPS endpoint for a self-hosted Infisical instance.
 
 Run on a fresh VPS:

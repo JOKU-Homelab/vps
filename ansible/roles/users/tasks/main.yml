@@ -13,6 +13,7 @@
   ansible.builtin.group:
     name: docker
     state: present
+  when: vps_create_docker_group | default(true)
 
 - name: Create configured user accounts
   ansible.builtin.user:

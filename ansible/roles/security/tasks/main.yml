@@ -55,6 +55,7 @@
     - 443/tcp
     - 51820/udp
     - 21820/udp
+  when: vps_open_pangolin_ports | default(true)
 
 - name: Configure the official CrowdSec RPM repository
   ansible.builtin.yum_repository:

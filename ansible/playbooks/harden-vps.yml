@@ -1,0 +1,14 @@
+---
+- name: Apply the host-only VPS hardening baseline
+  hosts: localhost
+  connection: local
+  become: true
+  vars:
+    ansible_admin_group: wheel
+    vps_create_docker_group: false
+    vps_open_pangolin_ports: false
+  roles:
+    - users
+    - ssh
+    - security
+    - system_updates

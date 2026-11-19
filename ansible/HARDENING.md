@@ -16,7 +16,15 @@ CrowdSec requires a remediation component to enforce its decisions; the firewall
 
 ## Apply to an existing host
 
-For a new VPS, use the repository's installer. For an existing host, configure a local inventory with its address and key, then run:
+For a new VPS that should receive only the host hardening baseline, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JOKU-Homelab/vps/main/install-hardening.sh | sudo bash
+```
+
+It stores the admin username and SSH public key in `/etc/vps-bootstrap/init.json`, then runs `harden-vps.yml`. It does not install Docker or deploy application stacks. The host security daemons and automatic security update timer are enabled.
+
+For an existing host, configure a local inventory with its address and key, then run:
 
 ```bash
 cd ansible
@@ -24,7 +32,7 @@ ansible-galaxy collection install -r requirements.yml
 ansible-playbook -i inventory/production.local.yml playbooks/configure-vps.yml
 ```
 
-Before applying SSH or firewall changes, confirm key-based access for the configured admin account and keep the current session and provider console available. The SSH role validates syntax and effective settings before restarting the SSH daemon.
+Before applying SSH or firewall changes, confirm key-based access for the configured admin account and keep the current session and provider console available. The SSH role validates syntax and effective settings before restarting the SSH daemon. The light installer leaves Pangolin web and tunnel ports closed.
 
 ## Operational review
 
